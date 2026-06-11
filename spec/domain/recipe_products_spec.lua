@@ -109,4 +109,62 @@ describe("domain.recipe_products.map", function()
   it("returns an empty output for an empty input", function()
     assert.are.same({}, recipe_products.map({}, PRODUCTS))
   end)
+
+  it("item products inherit the input recipe signal's quality", function()
+    local out = recipe_products.map({ sig("recipe", "copper-cable", 1, "legendary") }, PRODUCTS)
+    assert.are.same({
+      { type = "item", name = "copper-cable", quality = "legendary", count = 2 },
+    }, out)
+  end)
+
+  it("fluid products are always normal, whatever the input quality", function()
+    local out = recipe_products.map(
+      { sig("recipe", "advanced-oil-processing", 1, "legendary") },
+      PRODUCTS
+    )
+    for _, signal in ipairs(out) do
+      assert.are.equal("normal", signal.quality)
+    end
+  end)
+
+  it("keeps the same item at different qualities as separate signals", function()
+    local out = recipe_products.map({
+      sig("recipe", "copper-cable", 1, "normal"),
+      sig("recipe", "copper-cable", 1, "legendary"),
+    }, PRODUCTS)
+    assert.are.same({
+      { type = "item", name = "copper-cable", quality = "legendary", count = 2 },
+      { type = "item", name = "copper-cable", quality = "normal", count = 2 },
+    }, out)
+  end)
+
+  it("sums shared item products only within the same quality", function()
+    local shared = {
+      ["a"] = { { type = "item", name = "iron-plate", amount = 2 } },
+      ["b"] = { { type = "item", name = "iron-plate", amount = 3 } },
+    }
+    local out = recipe_products.map({
+      sig("recipe", "a", 1, "rare"),
+      sig("recipe", "b", 1, "rare"),
+      sig("recipe", "b", 1, "normal"),
+    }, shared)
+    assert.are.same({
+      { type = "item", name = "iron-plate", quality = "normal", count = 3 },
+      { type = "item", name = "iron-plate", quality = "rare", count = 5 },
+    }, out)
+  end)
+
+  it("sums shared fluid products across input qualities", function()
+    local shared = {
+      ["a"] = { { type = "fluid", name = "steam", amount = 10 } },
+      ["b"] = { { type = "fluid", name = "steam", amount = 5 } },
+    }
+    local out = recipe_products.map({
+      sig("recipe", "a", 1, "legendary"),
+      sig("recipe", "b", 1, "normal"),
+    }, shared)
+    assert.are.same({
+      { type = "fluid", name = "steam", quality = "normal", count = 15 },
+    }, out)
+  end)
 end)
