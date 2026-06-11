@@ -58,9 +58,13 @@ local function signal_to_elem(value)
 end
 
 local function elem_to_filter_value(sig)
-  local value = { type = sig.type or "item", name = sig.name }
-  if sig.quality then
-    value.quality = sig.quality
+  local kind = sig.type or "item"
+  local value = { type = kind, name = sig.name }
+  -- A quality-less item filter means "any quality" — a non-trivial condition
+  -- the engine refuses to combine with a count. Pin it down like vanilla does.
+  if sig.quality or kind == "item" then
+    value.quality = sig.quality or "normal"
+    value.comparator = "="
   end
   return value
 end
@@ -422,7 +426,10 @@ local function confirm_slot_editor(player, entity)
     if sig then
       local n = tonumber(row.count_field.text) or 1
       n = math.max(INT32_MIN, math.min(INT32_MAX, n))
-      section.set_slot(target.slot, { value = elem_to_filter_value(sig), min = n })
+      local ok, err = pcall(section.set_slot, target.slot, { value = elem_to_filter_value(sig), min = n })
+      if not ok then
+        player.print(err)
+      end
     else
       section.clear_slot(target.slot)
     end
