@@ -8,7 +8,7 @@ local selector_mode = require("runtime.selector_mode")
 
 local FRAME_NAME = "lca_sc_frame"
 local DESCRIPTION_EDITOR_NAME = "lca_sc_description_editor"
-local INT32_MAX = 2147483647
+local INT32_MIN, INT32_MAX = -2147483648, 2147483647
 
 -- Vanilla dropdown order.
 local OPERATIONS = {
@@ -27,6 +27,7 @@ end
 
 -- Script-driven Modes appended after the vanilla operations.
 local CT_DROPDOWN_INDEX = #OPERATIONS + 1
+local MC_DROPDOWN_INDEX = #OPERATIONS + 2
 
 -- Vanilla circuit-condition comparator order; the engine reports the
 -- canonical single-character forms.
@@ -128,6 +129,19 @@ local function add_quality_dropdown(parent, selected_name, action, include_any)
     selected_index = selected,
     tags = { lca = "sc", action = action, names = names },
   }
+end
+
+local function elem_to_signal(sig)
+  if not sig then
+    return nil
+  end
+  return { type = sig.type or "item", name = sig.name, quality = sig.quality }
+end
+
+-- The Memory Cell's Update Condition, when that Mode is active.
+local function condition_of(entity)
+  local state = selector_mode.state_of(entity)
+  return state and state.mode == selector_mode.MODE_MEMORY_CELL and state.condition or nil
 end
 
 local function labeled_row(parent)
@@ -274,6 +288,49 @@ local function build_crafting_time_panel(panel, state)
   }
 end
 
+-- Update Condition row: signal | comparator | signal-or-constant.
+local function build_memory_cell_panel(panel, state)
+  panel.add{ type = "label", caption = { "lca-gui.update-condition" }, style = "semibold_label" }
+  local condition = state.condition or {}
+  local row = labeled_row(panel)
+  row.add{
+    type = "choose-elem-button",
+    elem_type = "signal",
+    signal = common.signal_to_elem(condition.first),
+    tags = { lca = "sc", action = "mc_first" },
+  }
+  local comparator = comparator_of(condition.comparator or "<")
+  local selected = 1
+  for i, c in ipairs(COMPARATORS) do
+    if c == comparator then
+      selected = i
+    end
+  end
+  local picker = row.add{
+    type = "drop-down",
+    items = COMPARATORS,
+    selected_index = selected,
+    tags = { lca = "sc", action = "mc_comparator" },
+  }
+  picker.style.width = 60
+  row.add{
+    type = "choose-elem-button",
+    elem_type = "signal",
+    signal = common.signal_to_elem(condition.second),
+    tags = { lca = "sc", action = "mc_second" },
+  }
+  local constant = row.add{
+    type = "textfield",
+    text = tostring(condition.constant or 0),
+    numeric = true,
+    allow_decimal = false,
+    allow_negative = true,
+    enabled = condition.second == nil,
+    tags = { lca = "sc", action = "mc_constant" },
+  }
+  constant.style.width = 60
+end
+
 local PANEL_BUILDERS = {
   ["select"] = build_select_panel,
   ["count"] = build_count_panel,
@@ -323,26 +380,37 @@ function sc_gui.open(player, entity)
   local params = parameters(entity)
   local op = params.operation or "select"
   local mode_state = selector_mode.state_of(entity)
-  local in_ct = mode_state and mode_state.mode == selector_mode.MODE_CRAFTING_TIME
+  local script_mode = mode_state and mode_state.mode
+  local in_ct = script_mode == selector_mode.MODE_CRAFTING_TIME
+  local in_mc = script_mode == selector_mode.MODE_MEMORY_CELL
 
   local items = {}
   for i, name in ipairs(OPERATIONS) do
     items[i] = { "gui-selector." .. name }
   end
   items[CT_DROPDOWN_INDEX] = { "lca-gui.mode-crafting-time" }
+  items[MC_DROPDOWN_INDEX] = { "lca-gui.mode-memory-cell" }
+  local selected_index = OP_INDEX[op] or 1
+  if in_ct then
+    selected_index = CT_DROPDOWN_INDEX
+  elseif in_mc then
+    selected_index = MC_DROPDOWN_INDEX
+  end
   local dropdown = inner.add{
     type = "drop-down",
     items = items,
-    selected_index = in_ct and CT_DROPDOWN_INDEX or OP_INDEX[op] or 1,
+    selected_index = selected_index,
     tags = { lca = "sc", action = "operation" },
   }
   dropdown.style.horizontally_stretchable = true
 
-  local description = inner.add{
-    type = "label",
-    caption = in_ct and { "lca-gui.mode-crafting-time-description" }
-      or { "gui-selector." .. op .. "-description" },
-  }
+  local description_caption = { "gui-selector." .. op .. "-description" }
+  if in_ct then
+    description_caption = { "lca-gui.mode-crafting-time-description" }
+  elseif in_mc then
+    description_caption = { "lca-gui.mode-memory-cell-description" }
+  end
+  local description = inner.add{ type = "label", caption = description_caption }
   description.style.single_line = false
   description.style.maximal_width = 400
 
@@ -350,6 +418,8 @@ function sc_gui.open(player, entity)
   panel.style.vertical_spacing = 8
   if in_ct then
     build_crafting_time_panel(panel, mode_state)
+  elseif in_mc then
+    build_memory_cell_panel(panel, mode_state)
   else
     local builder = PANEL_BUILDERS[op]
     if builder then
@@ -455,6 +525,8 @@ function sc_gui.on_selection(event)
   if action == "operation" then
     if index == CT_DROPDOWN_INDEX then
       selector_mode.set_crafting_time(entity)
+    elseif index == MC_DROPDOWN_INDEX then
+      selector_mode.set_memory_cell(entity)
     else
       selector_mode.set_vanilla(entity)
       update_parameters(player, entity, function(p)
@@ -482,6 +554,11 @@ function sc_gui.on_selection(event)
         -- The engine silently drops every other BlueprintQualityID shape.
         p.quality_source_static = { name = name }
       end)
+    end
+  elseif action == "mc_comparator" then
+    local condition = condition_of(entity)
+    if condition then
+      condition.comparator = COMPARATORS[index] or "<"
     end
   end
 end
@@ -513,6 +590,18 @@ function sc_gui.on_elem_changed(event)
   local sig = event.element.elem_value
   if action == "ct_machine" then
     selector_mode.set_machine(entity, sig)
+  elseif action == "mc_first" then
+    local condition = condition_of(entity)
+    if condition then
+      condition.first = elem_to_signal(sig)
+    end
+  elseif action == "mc_second" then
+    local condition = condition_of(entity)
+    if condition then
+      condition.second = elem_to_signal(sig)
+      -- Toggle the constant field's enabled state.
+      reopen(player, entity)
+    end
   elseif action == "index_signal" then
     update_parameters(player, entity, function(p)
       p.index_signal = sig
@@ -542,7 +631,12 @@ function sc_gui.on_text_changed(event)
   if not n then
     return
   end
-  if tags.action == "index_constant" then
+  if tags.action == "mc_constant" then
+    local condition = condition_of(entity)
+    if condition then
+      condition.constant = math.max(INT32_MIN, math.min(INT32_MAX, n))
+    end
+  elseif tags.action == "index_constant" then
     update_parameters(player, entity, function(p)
       p.index_constant = math.max(1, math.min(INT32_MAX, n)) - 1
     end)

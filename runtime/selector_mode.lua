@@ -7,14 +7,16 @@
 -- hidden combinator when the output frame actually changes.
 
 local crafting_time = require("domain.crafting_time")
+local memory_cell = require("domain.memory_cell")
 local preset = require("runtime.preset")
 
 local selector_mode = {}
 
 selector_mode.MODE_CRAFTING_TIME = "crafting-time"
+selector_mode.MODE_MEMORY_CELL = "memory-cell"
 
 local OUTPUT_ENTITY = "lca-hidden-output"
-local INT32_MAX = 2147483647
+local INT32_MIN, INT32_MAX = -2147483648, 2147483647
 local INERT_PARAMETERS = { operation = "count" }
 
 local function mode_states()
@@ -84,26 +86,49 @@ local function destroy_output(state)
   state.output = nil
 end
 
---- Enter Crafting-Time Mode: stash the vanilla parameters, park the
---- selector inert and attach the hidden output. No-op when already active.
-function selector_mode.set_crafting_time(entity)
+-- Enter a script Mode. Coming from engine-driven: stash the vanilla
+-- parameters, park the selector inert and attach the hidden output.
+-- Switching between script Modes keeps the stash and the hidden output.
+-- Returns the state and whether the Mode actually changed.
+local function enter_script_mode(entity, mode)
   local all = mode_states()
   local state = all[entity.unit_number]
-  if state and state.mode == selector_mode.MODE_CRAFTING_TIME then
+  if state then
     state.entity = entity
-    return state
+    if state.mode == mode then
+      return state, false
+    end
+    state.mode = mode
+    state.last_output = nil
+    return state, true
   end
   local cb = entity.get_or_create_control_behavior()
   state = {
-    mode = selector_mode.MODE_CRAFTING_TIME,
+    mode = mode,
     entity = entity,
-    machine = preset.default_machine(),
     stash = cb.parameters,
   }
   all[entity.unit_number] = state
   cb.parameters = INERT_PARAMETERS
   ensure_output(entity, state)
   script.register_on_object_destroyed(entity)
+  return state, true
+end
+
+function selector_mode.set_crafting_time(entity)
+  local state = enter_script_mode(entity, selector_mode.MODE_CRAFTING_TIME)
+  if state.machine == nil then
+    state.machine = preset.default_machine()
+  end
+  return state
+end
+
+function selector_mode.set_memory_cell(entity)
+  local state, changed = enter_script_mode(entity, selector_mode.MODE_MEMORY_CELL)
+  if changed then
+    state.stored = {}
+  end
+  state.condition = state.condition or { comparator = "<", constant = 0 }
   return state
 end
 
@@ -169,7 +194,7 @@ end
 local function signature(out)
   local parts = {}
   for i, signal in ipairs(out) do
-    parts[i] = signal.name .. "/" .. (signal.quality or "") .. "=" .. signal.count
+    parts[i] = (signal.type or "item") .. "/" .. signal.name .. "/" .. (signal.quality or "") .. "=" .. signal.count
   end
   return table.concat(parts, ";")
 end
@@ -184,8 +209,13 @@ local function write_output(entity, state, out)
   local filters = {}
   for i, signal in ipairs(out) do
     filters[i] = {
-      value = { type = "recipe", name = signal.name, quality = signal.quality or "normal", comparator = "=" },
-      min = math.min(signal.count, INT32_MAX),
+      value = {
+        type = signal.type or "item",
+        name = signal.name,
+        quality = signal.quality or "normal",
+        comparator = "=",
+      },
+      min = math.max(INT32_MIN, math.min(signal.count, INT32_MAX)),
     }
   end
   local ok, err = pcall(function()
@@ -209,12 +239,27 @@ local function drive_crafting_time(entity, state)
   end
 end
 
+local function drive_memory_cell(entity, state)
+  state.stored = memory_cell.step(state.stored or {}, merged_input_frame(entity), state.condition)
+  local current = signature(state.stored)
+  if current ~= state.last_output then
+    state.last_output = current
+    write_output(entity, state, state.stored)
+  end
+end
+
+local DRIVERS = {
+  [selector_mode.MODE_CRAFTING_TIME] = drive_crafting_time,
+  [selector_mode.MODE_MEMORY_CELL] = drive_memory_cell,
+}
+
 function selector_mode.on_tick()
   for unit_number, state in pairs(mode_states()) do
-    if state.mode == selector_mode.MODE_CRAFTING_TIME then
+    local driver = DRIVERS[state.mode]
+    if driver then
       local entity = state.entity
       if entity and entity.valid then
-        drive_crafting_time(entity, state)
+        driver(entity, state)
       else
         selector_mode.forget(unit_number)
       end
