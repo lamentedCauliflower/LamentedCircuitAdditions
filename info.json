@@ -1,10 +1,10 @@
 {
-  "name": "[internal-mod-name]",
+  "name": "lamented-circuit-additions",
   "version": "0.0.0",
-  "title": "[MOD DISPLAY NAME]",
-  "author": "[YOUR MODS.FACTORIO.COM USERNAME]",
-  "homepage": "[HOMEPAGE/REPO URL]",
-  "description": "[SHORT DESCRIPTION]",
+  "title": "Lamented Circuit Additions",
+  "author": "lamentedCauliflower",
+  "homepage": "https://github.com/lamentedCauliflower/LamentedCircuitAdditions",
+  "description": "Adds new modes to the vanilla combinators: runtime-generated presets for the constant combinator, plus crafting-time lookup and a memory cell for the selector combinator.",
   "factorio_version": "2.0",
   "dependencies": [
     "base"
