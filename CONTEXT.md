@@ -20,9 +20,7 @@ _Avoid_: template, profile
 
 **Craftable Set**:
 The recipes a Target Machine can craft: recipe category is among the machine's
-crafting categories, after Filters are applied. Emitted as the recipe's main item
-product signal (value 1) when it has one, falling back to the recipe signal
-otherwise; recipes sharing a product collapse into one signal.
+crafting categories, after Filters are applied. Emitted as recipe signals, value 1.
 _Avoid_: recipe list, item list
 
 **Target Machine**:
