@@ -56,6 +56,20 @@ describe("domain.craftable_set.compute", function()
     assert.are.same({ "iron-gear-wheel", "rocket-fuel" }, off)
   end)
 
+  it("tracks researched-set changes on recompute", function()
+    local recipes = { recipe("iron-gear-wheel"), recipe("engine-unit") }
+    local filters = { researched_only = true, no_fluid_inputs = false }
+    local before = craftable_set.compute(recipes, CATEGORIES, filters,
+      { ["iron-gear-wheel"] = true })
+    local after = craftable_set.compute(recipes, CATEGORIES, filters,
+      { ["iron-gear-wheel"] = true, ["engine-unit"] = true })
+    local reversed = craftable_set.compute(recipes, CATEGORIES, filters,
+      { ["engine-unit"] = true })
+    assert.are.same({ "iron-gear-wheel" }, before)
+    assert.are.same({ "engine-unit", "iron-gear-wheel" }, after)
+    assert.are.same({ "engine-unit" }, reversed)
+  end)
+
   it("excludes fluid-ingredient recipes when no_fluid_inputs is on", function()
     local recipes = {
       recipe("iron-gear-wheel"),

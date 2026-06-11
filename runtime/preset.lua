@@ -26,7 +26,8 @@ local function default_machine()
   return nil
 end
 
---- Per-combinator mod state, created on first access.
+--- Per-combinator mod state, created on first access. Keeps an entity
+--- reference so research events can recompute without a GUI open.
 function preset.state_for(entity)
   local all = mode_states()
   local state = all[entity.unit_number]
@@ -34,6 +35,7 @@ function preset.state_for(entity)
     state = { mode = preset.MODE_LOGISTIC_GROUPS }
     all[entity.unit_number] = state
   end
+  state.entity = entity
   return state
 end
 
@@ -158,6 +160,48 @@ function preset.apply(entity, state)
   end
   script.register_on_object_destroyed(entity)
   return #names
+end
+
+-- States saved before entity references were kept (or after surface
+-- surgery) get relinked by scanning for constant combinators once.
+local function rebind_entities()
+  local by_unit = mode_states()
+  for _, surface in pairs(game.surfaces) do
+    for _, entity in pairs(surface.find_entities_filtered{ type = "constant-combinator" }) do
+      local state = by_unit[entity.unit_number]
+      if state and not (state.entity and state.entity.valid) then
+        state.entity = entity
+      end
+    end
+  end
+end
+
+--- Recompute every researched-only Craftable Set combinator of the force
+--- whose research changed. Fired on research finished and reversed.
+function preset.on_research_changed(event)
+  local force = event.research.force
+  local needs_rebind = false
+  for _, state in pairs(mode_states()) do
+    if state.mode == preset.MODE_CRAFTABLE_SET and not (state.entity and state.entity.valid) then
+      needs_rebind = true
+      break
+    end
+  end
+  if needs_rebind then
+    rebind_entities()
+  end
+  for _, state in pairs(mode_states()) do
+    local entity = state.entity
+    if
+      state.mode == preset.MODE_CRAFTABLE_SET
+      and state.researched_only ~= false
+      and entity
+      and entity.valid
+      and entity.force == force
+    then
+      preset.apply(entity, state)
+    end
+  end
 end
 
 --- Switch a combinator between Modes. No-op when already in that Mode.

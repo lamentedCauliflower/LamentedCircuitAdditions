@@ -1,6 +1,7 @@
 -- Runtime entry point. Factorio API access lives here and in runtime/;
 -- decision logic belongs in pure modules under domain/.
 local cc_gui = require("runtime.cc_gui")
+local preset = require("runtime.preset")
 
 script.on_init(function()
   storage.cc_gui = {}
@@ -27,4 +28,6 @@ script.on_event(defines.events.on_gui_checked_state_changed, cc_gui.on_checked)
 script.on_event(defines.events.on_gui_switch_state_changed, cc_gui.on_switch)
 script.on_event(defines.events.on_gui_value_changed, cc_gui.on_value_changed)
 script.on_event(defines.events.on_object_destroyed, cc_gui.on_object_destroyed)
+script.on_event(defines.events.on_research_finished, preset.on_research_changed)
+script.on_event(defines.events.on_research_reversed, preset.on_research_changed)
 script.on_event(defines.events.on_gui_selection_state_changed, cc_gui.on_selection)
