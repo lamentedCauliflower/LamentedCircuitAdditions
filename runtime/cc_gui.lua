@@ -3,6 +3,8 @@
 -- logistic sections with groups/multipliers, numbered slot grid, slot editor,
 -- description editor) with one addition: the Mode dropdown.
 
+local preset = require("runtime.preset")
+
 local FRAME_NAME = "lca_cc_frame"
 local SLOT_EDITOR_NAME = "lca_cc_slot_editor"
 local DESCRIPTION_EDITOR_NAME = "lca_cc_description_editor"
@@ -256,7 +258,11 @@ function cc_gui.rebuild_sections(player)
   if not (entity and entity.valid) then
     return cc_gui.close(player)
   end
-  local flow = frame.content.inner.sections_frame.sections_scroll.sections
+  local sections_frame = frame.content.inner.sections_frame
+  if not sections_frame then
+    return
+  end
+  local flow = sections_frame.sections_scroll.sections
   flow.clear()
   local cb = entity.get_or_create_control_behavior()
   local groups = entity.force.get_logistic_groups()
@@ -313,32 +319,67 @@ function cc_gui.open(player, entity)
   }
 
   -- The one deliberate addition over vanilla (ADR-0001).
+  local mode_state = preset.state_for(entity)
+  local in_preset = mode_state.mode == preset.MODE_CRAFTABLE_SET
   local mode = inner.add{ type = "flow", direction = "horizontal" }
   mode.style.vertical_align = "center"
   mode.add{ type = "label", caption = { "lca-gui.mode" }, style = "semibold_label" }
   mode.add{
     type = "drop-down",
-    items = { { "lca-gui.mode-logistic-groups" } },
-    selected_index = 1,
+    items = { { "lca-gui.mode-logistic-groups" }, { "lca-gui.mode-craftable-set" } },
+    selected_index = in_preset and 2 or 1,
     tags = { lca = "cc", action = "mode" },
   }
 
-  local sections_frame = inner.add{
-    type = "frame",
-    name = "sections_frame",
-    direction = "vertical",
-    style = "deep_frame_in_shallow_frame",
-  }
-  local scroll = sections_frame.add{ type = "scroll-pane", name = "sections_scroll" }
-  scroll.style.maximal_height = 400
-  scroll.style.horizontally_stretchable = true
-  scroll.add{ type = "flow", name = "sections", direction = "vertical" }
-  local add_button = sections_frame.add{
-    type = "button",
-    caption = { "gui-logistic.add-section" },
-    tags = { lca = "cc", action = "add_section" },
-  }
-  add_button.style.horizontally_stretchable = true
+  if in_preset then
+    local controls = inner.add{ type = "flow", name = "preset_flow", direction = "vertical" }
+    controls.style.vertical_spacing = 8
+    local machine_row = controls.add{ type = "flow", direction = "horizontal" }
+    machine_row.style.vertical_align = "center"
+    machine_row.add{ type = "label", caption = { "lca-gui.machine" } }
+    machine_row.add{
+      type = "choose-elem-button",
+      elem_type = "entity",
+      entity = mode_state.machine,
+      elem_filters = { { filter = "crafting-machine" } },
+      tooltip = { "lca-gui.machine-tooltip" },
+      tags = { lca = "cc", action = "preset_machine" },
+    }
+    controls.add{
+      type = "checkbox",
+      state = mode_state.researched_only ~= false,
+      caption = { "lca-gui.researched-only" },
+      tags = { lca = "cc", action = "preset_researched" },
+    }
+    controls.add{
+      type = "checkbox",
+      state = mode_state.no_fluid == true,
+      caption = { "lca-gui.no-fluid-inputs" },
+      tags = { lca = "cc", action = "preset_no_fluid" },
+    }
+    controls.add{
+      type = "label",
+      name = "preset_count",
+      caption = { "lca-gui.recipe-count", #preset.compute(entity.force, mode_state) },
+    }
+  else
+    local sections_frame = inner.add{
+      type = "frame",
+      name = "sections_frame",
+      direction = "vertical",
+      style = "deep_frame_in_shallow_frame",
+    }
+    local scroll = sections_frame.add{ type = "scroll-pane", name = "sections_scroll" }
+    scroll.style.maximal_height = 400
+    scroll.style.horizontally_stretchable = true
+    scroll.add{ type = "flow", name = "sections", direction = "vertical" }
+    local add_button = sections_frame.add{
+      type = "button",
+      caption = { "gui-logistic.add-section" },
+      tags = { lca = "cc", action = "add_section" },
+    }
+    add_button.style.horizontally_stretchable = true
+  end
 
   inner.add{
     type = "button",
@@ -346,7 +387,9 @@ function cc_gui.open(player, entity)
     tags = { lca = "cc", action = "edit_description" },
   }
 
-  cc_gui.rebuild_sections(player)
+  if not in_preset then
+    cc_gui.rebuild_sections(player)
+  end
 
   frame.auto_center = true
   player.opened = frame
@@ -536,12 +579,27 @@ function cc_gui.on_click(event)
   end
 end
 
+-- Recompute the Craftable Set and refresh the recipe-count label.
+local function refresh_preset(player, entity)
+  local state = preset.state_for(entity)
+  local count = preset.apply(entity, state)
+  local frame = player.gui.screen[FRAME_NAME]
+  local controls = frame and frame.content.inner.preset_flow
+  if controls then
+    controls.preset_count.caption = { "lca-gui.recipe-count", count }
+  end
+end
+
 function cc_gui.on_elem_changed(event)
-  local player, _, tags = context(event)
-  if not player or tags.action ~= "editor_signal" then
+  local player, entity, tags = context(event)
+  if not player then
     return
   end
-  -- Selecting a signal is applied on confirm, like vanilla.
+  if tags.action == "preset_machine" then
+    preset.state_for(entity).machine = event.element.elem_value
+    refresh_preset(player, entity)
+  end
+  -- "editor_signal" is applied on confirm, like vanilla.
 end
 
 function cc_gui.on_value_changed(event)
@@ -593,12 +651,20 @@ end
 
 function cc_gui.on_checked(event)
   local player, entity, tags = context(event)
-  if not player or tags.action ~= "section_active" then
+  if not player then
     return
   end
-  local section = section_at(entity, tags.section)
-  if section and section.is_manual then
-    section.active = event.element.state
+  if tags.action == "section_active" then
+    local section = section_at(entity, tags.section)
+    if section and section.is_manual then
+      section.active = event.element.state
+    end
+  elseif tags.action == "preset_researched" then
+    preset.state_for(entity).researched_only = event.element.state
+    refresh_preset(player, entity)
+  elseif tags.action == "preset_no_fluid" then
+    preset.state_for(entity).no_fluid = event.element.state
+    refresh_preset(player, entity)
   end
 end
 
@@ -617,7 +683,14 @@ function cc_gui.on_selection(event)
     return
   end
   if tags.action == "mode" then
-    -- Single "Logistic Groups" entry in this slice; Presets arrive next.
+    local target = event.element.selected_index == 2
+      and preset.MODE_CRAFTABLE_SET
+      or preset.MODE_LOGISTIC_GROUPS
+    if preset.state_for(entity).mode ~= target then
+      preset.set_mode(entity, target)
+      -- Rebuild the whole window around the new Mode.
+      cc_gui.open(player, entity)
+    end
     return
   end
   if tags.action == "section_group_select" then
@@ -640,8 +713,12 @@ function cc_gui.on_selection(event)
 end
 
 -- Close every window still pointing at a combinator that no longer exists
--- (mined, destroyed, killed by script — anything).
-function cc_gui.on_object_destroyed(_)
+-- (mined, destroyed, killed by script — anything), and drop the destroyed
+-- combinator's Mode state.
+function cc_gui.on_object_destroyed(event)
+  if event.type == defines.target_type.entity and event.useful_id then
+    preset.forget(event.useful_id)
+  end
   for player_index, state in pairs(states()) do
     if not (state.entity and state.entity.valid) then
       local player = game.get_player(player_index)

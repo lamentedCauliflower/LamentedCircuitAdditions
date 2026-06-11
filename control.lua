@@ -4,6 +4,7 @@ local cc_gui = require("runtime.cc_gui")
 
 script.on_init(function()
   storage.cc_gui = {}
+  storage.cc_modes = {}
 end)
 
 script.on_event(defines.events.on_gui_opened, function(event)
