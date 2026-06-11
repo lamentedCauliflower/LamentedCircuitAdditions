@@ -49,6 +49,9 @@ local function tag_for(entity)
     if state and state.mode == selector_mode.MODE_RECIPE_PRODUCTS then
       return { mode = state.mode, stash = copy(state.stash) }
     end
+    if state and state.mode == selector_mode.MODE_RECIPE_FINDER then
+      return { mode = state.mode, machine = state.machine, stash = copy(state.stash) }
+    end
   end
   return nil
 end
@@ -88,6 +91,13 @@ local function apply_tag(entity, tag)
       end
     elseif tag.mode == selector_mode.MODE_RECIPE_PRODUCTS then
       local state = selector_mode.set_recipe_products(entity)
+      state.last_output = nil
+      if tag.stash then
+        state.stash = copy(tag.stash)
+      end
+    elseif tag.mode == selector_mode.MODE_RECIPE_FINDER then
+      local state = selector_mode.set_recipe_finder(entity)
+      state.machine = tag.machine
       state.last_output = nil
       if tag.stash then
         state.stash = copy(tag.stash)
