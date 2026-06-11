@@ -8,7 +8,9 @@ modes.
 
 **Mode**:
 The behavior a combinator is set to via the mod's dropdown. Exactly one Mode is active
-per combinator; "Vanilla" is always the first Mode and reproduces unmodded behavior.
+per combinator; the first Mode always reproduces unmodded behavior — named
+"Logistic Groups" on the constant combinator (whose 2.0 output is configured through
+logistic groups) and "Vanilla" on the selector combinator.
 _Avoid_: function, setting, operation (reserved for vanilla selector operations)
 
 **Preset**:

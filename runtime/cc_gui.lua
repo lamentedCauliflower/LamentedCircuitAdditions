@@ -69,7 +69,7 @@ local function add_slot_cell(tbl, section_index, slot_index, filter)
   count.style.horizontal_align = "center"
 end
 
-local function render_section(container, section, section_index)
+local function render_section(container, section, section_index, groups)
   local sec_frame = container.add{ type = "frame", direction = "vertical", style = "bordered_frame" }
 
   local header = sec_frame.add{ type = "flow", direction = "horizontal" }
@@ -80,13 +80,45 @@ local function render_section(container, section, section_index)
     tooltip = { "lca-gui.section-active" },
     tags = { lca = "cc", action = "section_active", section = section_index },
   }
-  local group = header.add{
+
+  -- 2.0 sections are logistic groups: pick an existing force group, or type a
+  -- new name to create one. Grouped sections get the vanilla multiplier.
+  local items = { { "lca-gui.no-group" } }
+  local selected = 1
+  for i, name in ipairs(groups) do
+    items[#items + 1] = name
+    if name == section.group then
+      selected = i + 1
+    end
+  end
+  header.add{
+    type = "drop-down",
+    items = items,
+    selected_index = selected,
+    tooltip = { "lca-gui.group-select-tooltip" },
+    tags = { lca = "cc", action = "section_group_select", section = section_index, groups = groups },
+  }
+  local new_group = header.add{
     type = "textfield",
-    text = section.group or "",
-    tooltip = { "lca-gui.group-tooltip" },
+    text = "",
+    tooltip = { "lca-gui.new-group-tooltip" },
     tags = { lca = "cc", action = "section_group", section = section_index },
   }
-  group.style.width = 160
+  new_group.style.width = 120
+
+  if section.group ~= "" then
+    header.add{ type = "label", caption = "×" }
+    local multiplier = header.add{
+      type = "textfield",
+      text = tostring(section.multiplier),
+      numeric = true,
+      allow_decimal = true,
+      allow_negative = false,
+      tooltip = { "lca-gui.multiplier-tooltip" },
+      tags = { lca = "cc", action = "multiplier", section = section_index },
+    }
+    multiplier.style.width = 50
+  end
   local filler = header.add{ type = "empty-widget" }
   filler.style.horizontally_stretchable = true
   header.add{
@@ -124,8 +156,9 @@ function cc_gui.rebuild_sections(player)
   local flow = frame.content.sections_scroll.sections
   flow.clear()
   local cb = entity.get_or_create_control_behavior()
+  local groups = entity.force.get_logistic_groups()
   for i, section in ipairs(cb.sections) do
-    render_section(flow, section, i)
+    render_section(flow, section, i, groups)
   end
 end
 
@@ -182,7 +215,7 @@ function cc_gui.open(player, entity)
   mode.add{ type = "label", caption = { "lca-gui.mode" } }
   mode.add{
     type = "drop-down",
-    items = { { "lca-gui.mode-vanilla" } },
+    items = { { "lca-gui.mode-logistic-groups" } },
     selected_index = 1,
     tags = { lca = "cc", action = "mode" },
   }
@@ -253,7 +286,7 @@ function cc_gui.on_elem_changed(event)
     return
   end
   local section = section_at(entity, tags.section)
-  if not section then
+  if not (section and section.is_manual) then
     return cc_gui.rebuild_sections(player)
   end
   local sig = event.element.elem_value
@@ -271,19 +304,26 @@ end
 
 function cc_gui.on_text_changed(event)
   local player, entity, tags = context(event)
-  if not player or tags.action ~= "count" then
+  if not player then
     return
   end
   local n = tonumber(event.element.text)
   if not n then
     return
   end
-  n = math.max(INT32_MIN, math.min(INT32_MAX, n))
-  local section = section_at(entity, tags.section)
-  local filter = section and read_slot(section, tags.slot)
-  if filter then
-    filter.min = n
-    section.set_slot(tags.slot, filter)
+  if tags.action == "count" then
+    n = math.max(INT32_MIN, math.min(INT32_MAX, n))
+    local section = section_at(entity, tags.section)
+    local filter = section and section.is_manual and read_slot(section, tags.slot)
+    if filter then
+      filter.min = n
+      section.set_slot(tags.slot, filter)
+    end
+  elseif tags.action == "multiplier" then
+    local section = section_at(entity, tags.section)
+    if section and section.is_manual and n >= 0 then
+      section.multiplier = n
+    end
   end
 end
 
@@ -292,9 +332,11 @@ function cc_gui.on_confirmed(event)
   if not player or tags.action ~= "section_group" then
     return
   end
+  local name = event.element.text
   local section = section_at(entity, tags.section)
-  if section then
-    section.group = event.element.text
+  if section and section.is_manual and name ~= "" then
+    entity.force.create_logistic_group(name)
+    section.group = name
     cc_gui.rebuild_sections(player)
   end
 end
@@ -319,11 +361,30 @@ function cc_gui.on_switch(event)
 end
 
 function cc_gui.on_selection(event)
-  local player, _, tags = context(event)
-  if not player or tags.action ~= "mode" then
+  local player, entity, tags = context(event)
+  if not player then
     return
   end
-  -- Single "Vanilla" entry in this slice; Presets arrive with the next one.
+  if tags.action == "mode" then
+    -- Single "Logistic Groups" entry in this slice; Presets arrive next.
+    return
+  end
+  if tags.action == "section_group_select" then
+    local section = section_at(entity, tags.section)
+    if not (section and section.is_manual) then
+      return
+    end
+    local index = event.element.selected_index
+    if index <= 1 then
+      section.group = ""
+    else
+      local name = (tags.groups or {})[index - 1]
+      if name then
+        section.group = name
+      end
+    end
+    cc_gui.rebuild_sections(player)
+  end
 end
 
 function cc_gui.on_gui_closed(event)
