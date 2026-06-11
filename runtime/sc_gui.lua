@@ -64,21 +64,29 @@ local function comparator_of(value)
   return CANONICAL_COMPARATOR[value] or value or "="
 end
 
--- quality_filter may come back as a string shorthand or a table.
+-- The engine hands quality back as a string, a table, or a prototype
+-- object; everything but a string has a .name.
+local function quality_name_of(value)
+  if type(value) == "string" then
+    return value
+  end
+  return value and value.name or nil
+end
+
+-- quality_filter may come back as a string shorthand or a table. The
+-- engine refuses a quality_filter write without a comparator key, so one
+-- is always present here.
 local function quality_filter_of(params)
   local qf = params.quality_filter
   if type(qf) == "string" then
-    return { quality = qf }
+    qf = { quality = qf }
+  elseif type(qf) == "table" then
+    qf = { quality = quality_name_of(qf.quality), comparator = qf.comparator }
+  else
+    qf = {}
   end
-  return qf or {}
-end
-
--- BlueprintQualityID may be a string or { name = ... }.
-local function quality_name_of(value)
-  if type(value) == "table" then
-    return value.name
-  end
-  return value
+  qf.comparator = comparator_of(qf.comparator)
+  return qf
 end
 
 -- Visible qualities, lowest level first, for the static quality pickers.
@@ -150,9 +158,10 @@ local function build_select_panel(panel, params)
     signal = common.signal_to_elem(params.index_signal),
     tags = { lca = "sc", action = "index_signal" },
   }
+  -- Engine index is 0-based; vanilla displays it 1-based.
   local constant = row.add{
     type = "textfield",
-    text = tostring(params.index_constant or 0),
+    text = tostring((params.index_constant or 0) + 1),
     numeric = true,
     allow_decimal = false,
     allow_negative = false,
@@ -499,7 +508,7 @@ function sc_gui.on_text_changed(event)
   end
   if tags.action == "index_constant" then
     update_parameters(player, entity, function(p)
-      p.index_constant = math.max(0, math.min(INT32_MAX, n))
+      p.index_constant = math.max(1, math.min(INT32_MAX, n)) - 1
     end)
   elseif tags.action == "random_interval" then
     update_parameters(player, entity, function(p)
