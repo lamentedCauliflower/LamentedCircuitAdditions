@@ -446,7 +446,8 @@ function sc_gui.on_selection(event)
     local name = (tags.names or {})[index]
     if name and name ~= "" then
       update_parameters(player, entity, function(p)
-        p.quality_source_static = name
+        -- The engine silently drops every other BlueprintQualityID shape.
+        p.quality_source_static = { name = name }
       end)
     end
   end
