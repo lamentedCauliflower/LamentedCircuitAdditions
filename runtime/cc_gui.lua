@@ -4,6 +4,7 @@
 -- description editor) with one addition: the Mode dropdown.
 
 local preset = require("runtime.preset")
+local common = require("runtime.gui_common")
 
 local FRAME_NAME = "lca_cc_frame"
 local SLOT_EDITOR_NAME = "lca_cc_slot_editor"
@@ -21,12 +22,7 @@ local function states()
   return storage.cc_gui
 end
 
-local function destroy_if_present(player, name)
-  local frame = player.gui.screen[name]
-  if frame then
-    frame.destroy()
-  end
-end
+local destroy_if_present = common.destroy_if_present
 
 function cc_gui.close(player)
   destroy_if_present(player, FRAME_NAME)
@@ -52,12 +48,7 @@ local function sprite_path(value)
   return prefix and (prefix .. value.name) or nil
 end
 
-local function signal_to_elem(value)
-  if not (value and value.name) then
-    return nil
-  end
-  return { type = value.type or "item", name = value.name, quality = value.quality }
-end
+local signal_to_elem = common.signal_to_elem
 
 local function elem_to_filter_value(sig)
   local kind = sig.type or "item"
@@ -83,52 +74,12 @@ local function section_at(entity, index)
   return entity.get_or_create_control_behavior().sections[index]
 end
 
--- Titlebar shared by all three windows.
 local function build_titlebar(frame, caption, close_action)
-  local bar = frame.add{ type = "flow", direction = "horizontal" }
-  bar.drag_target = frame
-  bar.add{ type = "label", caption = caption, style = "frame_title", ignored_by_interaction = true }
-  local drag = bar.add{ type = "empty-widget", style = "draggable_space_header", ignored_by_interaction = true }
-  drag.style.horizontally_stretchable = true
-  drag.style.height = 24
-  bar.add{
-    type = "sprite-button",
-    sprite = "utility/close",
-    style = "frame_action_button",
-    tags = { lca = "cc", action = close_action },
-  }
+  common.build_titlebar(frame, caption, "cc", close_action)
 end
 
-local function circuit_status_caption(entity)
-  local connector = defines.wire_connector_id
-  local red = entity.get_circuit_network(connector.circuit_red)
-  local green = entity.get_circuit_network(connector.circuit_green)
-  if not (red or green) then
-    return { "gui.not-connected" }
-  end
-  local caption = { "", { "gui-control-behavior.circuit-network" }, ":" }
-  if red then
-    caption[#caption + 1] = " [color=red]" .. red.network_id .. "[/color]"
-  end
-  if green then
-    caption[#caption + 1] = " [color=green]" .. green.network_id .. "[/color]"
-  end
-  return caption
-end
-
-local function status_definition(entity)
-  local status = entity.status
-  if status == defines.entity_status.working then
-    return "utility/status_working", { "entity-status.working" }
-  end
-  if status == defines.entity_status.no_power then
-    return "utility/status_not_working", { "entity-status.no-power" }
-  end
-  if status == defines.entity_status.low_power then
-    return "utility/status_yellow", { "entity-status.low-power" }
-  end
-  return "utility/status_yellow", { "entity-status.disabled" }
-end
+local circuit_status_caption = common.circuit_status_caption
+local status_definition = common.status_definition
 
 function cc_gui.refresh_status(player)
   local state = states()[player.index]
