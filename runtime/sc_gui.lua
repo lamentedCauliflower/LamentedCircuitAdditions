@@ -28,6 +28,7 @@ end
 -- Script-driven Modes appended after the vanilla operations.
 local CT_DROPDOWN_INDEX = #OPERATIONS + 1
 local MC_DROPDOWN_INDEX = #OPERATIONS + 2
+local RP_DROPDOWN_INDEX = #OPERATIONS + 3
 
 -- Vanilla circuit-condition comparator order; the engine reports the
 -- canonical single-character forms.
@@ -418,6 +419,7 @@ function sc_gui.open(player, entity)
   local script_mode = mode_state and mode_state.mode
   local in_ct = script_mode == selector_mode.MODE_CRAFTING_TIME
   local in_mc = script_mode == selector_mode.MODE_MEMORY_CELL
+  local in_rp = script_mode == selector_mode.MODE_RECIPE_PRODUCTS
 
   local items = {}
   for i, name in ipairs(OPERATIONS) do
@@ -425,11 +427,14 @@ function sc_gui.open(player, entity)
   end
   items[CT_DROPDOWN_INDEX] = { "lca-gui.mode-crafting-time" }
   items[MC_DROPDOWN_INDEX] = { "lca-gui.mode-memory-cell" }
+  items[RP_DROPDOWN_INDEX] = { "lca-gui.mode-recipe-products" }
   local selected_index = OP_INDEX[op] or 1
   if in_ct then
     selected_index = CT_DROPDOWN_INDEX
   elseif in_mc then
     selected_index = MC_DROPDOWN_INDEX
+  elseif in_rp then
+    selected_index = RP_DROPDOWN_INDEX
   end
   local dropdown = inner.add{
     type = "drop-down",
@@ -444,6 +449,8 @@ function sc_gui.open(player, entity)
     description_caption = { "lca-gui.mode-crafting-time-description" }
   elseif in_mc then
     description_caption = { "lca-gui.mode-memory-cell-description" }
+  elseif in_rp then
+    description_caption = { "lca-gui.mode-recipe-products-description" }
   end
   local description = inner.add{ type = "label", caption = description_caption }
   description.style.single_line = false
@@ -455,7 +462,8 @@ function sc_gui.open(player, entity)
     build_crafting_time_panel(panel, mode_state)
   elseif in_mc then
     build_memory_cell_panel(panel, mode_state)
-  else
+  elseif not in_rp then
+    -- Recipe Products has no settings.
     local builder = PANEL_BUILDERS[op]
     if builder then
       builder(panel, params)
@@ -574,6 +582,8 @@ function sc_gui.on_selection(event)
       selector_mode.set_crafting_time(entity)
     elseif index == MC_DROPDOWN_INDEX then
       selector_mode.set_memory_cell(entity)
+    elseif index == RP_DROPDOWN_INDEX then
+      selector_mode.set_recipe_products(entity)
     else
       selector_mode.set_vanilla(entity)
       update_parameters(player, entity, function(p)

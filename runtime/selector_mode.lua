@@ -8,12 +8,14 @@
 
 local crafting_time = require("domain.crafting_time")
 local memory_cell = require("domain.memory_cell")
+local recipe_products = require("domain.recipe_products")
 local preset = require("runtime.preset")
 
 local selector_mode = {}
 
 selector_mode.MODE_CRAFTING_TIME = "crafting-time"
 selector_mode.MODE_MEMORY_CELL = "memory-cell"
+selector_mode.MODE_RECIPE_PRODUCTS = "recipe-products"
 
 local OUTPUT_ENTITY = "lca-hidden-output"
 local INT32_MIN, INT32_MAX = -2147483648, 2147483647
@@ -40,6 +42,32 @@ local function energies()
     end
   end
   return energy_cache
+end
+
+-- Item and fluid products per recipe with their raw amount fields, rebuilt
+-- once per load from prototypes (deterministic, multiplayer-safe). The
+-- nominal-amount rule lives in the domain module.
+local products_cache
+local function products()
+  if not products_cache then
+    products_cache = {}
+    for name, proto in pairs(prototypes.recipe) do
+      local list = {}
+      for _, product in ipairs(proto.products or {}) do
+        if product.type == "item" or product.type == "fluid" then
+          list[#list + 1] = {
+            type = product.type,
+            name = product.name,
+            amount = product.amount,
+            amount_min = product.amount_min,
+            amount_max = product.amount_max,
+          }
+        end
+      end
+      products_cache[name] = list
+    end
+  end
+  return products_cache
 end
 
 local function machine_speed(machine_name)
@@ -121,6 +149,10 @@ function selector_mode.set_crafting_time(entity)
     state.machine = preset.default_machine()
   end
   return state
+end
+
+function selector_mode.set_recipe_products(entity)
+  return enter_script_mode(entity, selector_mode.MODE_RECIPE_PRODUCTS)
 end
 
 function selector_mode.set_memory_cell(entity)
@@ -249,6 +281,15 @@ local function drive_crafting_time(entity, state)
   end
 end
 
+local function drive_recipe_products(entity, state)
+  local out = recipe_products.map(merged_input_frame(entity), products())
+  local current = signature(out)
+  if current ~= state.last_output then
+    state.last_output = current
+    write_output(entity, state, out)
+  end
+end
+
 local function drive_memory_cell(entity, state)
   state.stored = memory_cell.step(state.stored or {}, merged_input_frame(entity), state.condition)
   local current = signature(state.stored)
@@ -261,6 +302,7 @@ end
 local DRIVERS = {
   [selector_mode.MODE_CRAFTING_TIME] = drive_crafting_time,
   [selector_mode.MODE_MEMORY_CELL] = drive_memory_cell,
+  [selector_mode.MODE_RECIPE_PRODUCTS] = drive_recipe_products,
 }
 
 function selector_mode.on_tick()
