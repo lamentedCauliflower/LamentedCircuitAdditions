@@ -48,10 +48,16 @@ end
 --- The Primary Recipe among a product's candidates on a machine: the recipe
 --- named exactly like the product, else the alphabetically first whose main
 --- product it is, else the alphabetically first qualifying producer.
-local function primary(candidates, product_name, machine_categories)
+--- Filters narrow the candidates before the tie-break, so a filtered-out
+--- name match falls through to the next candidate.
+local function primary(candidates, product_name, machine_categories, filters, researched)
   local first_main, first_any
   for _, candidate in ipairs(candidates) do
-    if machine_categories[candidate.category] then
+    if
+      machine_categories[candidate.category]
+      and (not filters.researched_only or researched[candidate.name])
+      and (not filters.no_fluid_inputs or not candidate.has_fluid_ingredient)
+    then
       if candidate.name == product_name then
         return candidate.name
       end
@@ -74,14 +80,17 @@ end
 --- @param frame table[] combined input signals: { type, name, quality, count }
 --- @param index table producer index from recipe_finder.index
 --- @param machine_categories table<string, boolean> the machine's crafting categories
+--- @param filters table { researched_only = boolean, no_fluid_inputs = boolean }
+--- @param researched table<string, boolean> recipe names enabled for the force
 --- @return table[] recipe signals sorted by name then quality:
 ---   { type = "recipe", name, quality, count }
-function recipe_finder.find(frame, index, machine_categories)
+function recipe_finder.find(frame, index, machine_categories, filters, researched)
   local merged, out = {}, {}
   for _, signal in ipairs(frame) do
     if (signal.type == "item" or signal.type == "fluid") and signal.count ~= 0 then
       local candidates = index[product_key(signal.type, signal.name)]
-      local recipe = candidates and primary(candidates, signal.name, machine_categories)
+      local recipe = candidates
+        and primary(candidates, signal.name, machine_categories, filters, researched)
       if recipe then
         local quality = signal.quality or "normal"
         local key = recipe .. "/" .. quality

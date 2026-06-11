@@ -50,7 +50,13 @@ local function tag_for(entity)
       return { mode = state.mode, stash = copy(state.stash) }
     end
     if state and state.mode == selector_mode.MODE_RECIPE_FINDER then
-      return { mode = state.mode, machine = state.machine, stash = copy(state.stash) }
+      return {
+        mode = state.mode,
+        machine = state.machine,
+        researched_only = state.researched_only ~= false,
+        no_fluid = state.no_fluid == true,
+        stash = copy(state.stash),
+      }
     end
   end
   return nil
@@ -98,6 +104,8 @@ local function apply_tag(entity, tag)
     elseif tag.mode == selector_mode.MODE_RECIPE_FINDER then
       local state = selector_mode.set_recipe_finder(entity)
       state.machine = tag.machine
+      state.researched_only = tag.researched_only ~= false
+      state.no_fluid = tag.no_fluid == true
       state.last_output = nil
       if tag.stash then
         state.stash = copy(tag.stash)

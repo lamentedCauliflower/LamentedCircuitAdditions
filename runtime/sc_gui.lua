@@ -292,6 +292,23 @@ local function build_machine_panel(panel, state, tooltip)
   }
 end
 
+-- Recipe Finder: Target Machine picker plus the two Filters.
+local function build_recipe_finder_panel(panel, state)
+  build_machine_panel(panel, state, { "lca-gui.machine-tooltip-recipe-finder" })
+  panel.add{
+    type = "checkbox",
+    state = state.researched_only ~= false,
+    caption = { "lca-gui.researched-only" },
+    tags = { lca = "sc", action = "rf_researched" },
+  }
+  panel.add{
+    type = "checkbox",
+    state = state.no_fluid == true,
+    caption = { "lca-gui.no-fluid-inputs" },
+    tags = { lca = "sc", action = "rf_no_fluid" },
+  }
+end
+
 local WILDCARDS = { "signal-everything", "signal-anything", "signal-each" }
 
 -- Update Condition row: signal | comparator | signal-or-constant, plus a
@@ -470,7 +487,7 @@ function sc_gui.open(player, entity)
   if in_ct then
     build_machine_panel(panel, mode_state, { "lca-gui.machine-tooltip-crafting-time" })
   elseif in_rf then
-    build_machine_panel(panel, mode_state, { "lca-gui.machine-tooltip-recipe-finder" })
+    build_recipe_finder_panel(panel, mode_state)
   elseif in_mc then
     build_memory_cell_panel(panel, mode_state)
   elseif not in_rp then
@@ -638,7 +655,11 @@ function sc_gui.on_checked(event)
   if not player then
     return
   end
-  if tags.action == "select_sort" then
+  if tags.action == "rf_researched" then
+    selector_mode.set_filter(entity, "researched_only", event.element.state)
+  elseif tags.action == "rf_no_fluid" then
+    selector_mode.set_filter(entity, "no_fluid", event.element.state)
+  elseif tags.action == "select_sort" then
     update_parameters(player, entity, function(p)
       p.select_max = tags.max
     end)

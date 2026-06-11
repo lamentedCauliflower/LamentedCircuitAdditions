@@ -28,9 +28,16 @@ local function fluid(name)
 end
 
 local CRAFTING = { crafting = true }
+local NO_FILTERS = { researched_only = false, no_fluid_inputs = false }
 
-local function find(frame, recipes, categories)
-  return recipe_finder.find(frame, recipe_finder.index(recipes), categories or CRAFTING)
+local function find(frame, recipes, categories, filters, researched)
+  return recipe_finder.find(
+    frame,
+    recipe_finder.index(recipes),
+    categories or CRAFTING,
+    filters or NO_FILTERS,
+    researched or {}
+  )
 end
 
 describe("domain.recipe_finder.find", function()
@@ -175,5 +182,57 @@ describe("domain.recipe_finder.find", function()
 
   it("returns an empty output for an empty input", function()
     assert.are.same({}, find({}, {}))
+  end)
+
+  describe("Filters", function()
+    local RESEARCHED_ONLY = { researched_only = true, no_fluid_inputs = false }
+    local NO_FLUID = { researched_only = false, no_fluid_inputs = true }
+
+    it("researched-only excludes unresearched recipes", function()
+      local recipes = { recipe("widget", { item("widget") }) }
+      local out = find({ sig("item", "widget", 1) }, recipes, nil, RESEARCHED_ONLY, {})
+      assert.are.same({}, out)
+      out = find({ sig("item", "widget", 1) }, recipes, nil, RESEARCHED_ONLY, { widget = true })
+      assert.are.equal("widget", out[1].name)
+    end)
+
+    it("no-fluid-inputs excludes recipes with fluid ingredients", function()
+      local recipes = {
+        recipe("widget", { item("widget") }, { has_fluid_ingredient = true }),
+      }
+      local out = find({ sig("item", "widget", 1) }, recipes, nil, NO_FLUID)
+      assert.are.same({}, out)
+    end)
+
+    it("filters apply before the tie-break: a filtered-out name match falls through", function()
+      local recipes = {
+        recipe("widget", { item("widget") }),
+        recipe("widget-pressing", { item("widget") }, { main_product = item("widget") }),
+      }
+      local out = find(
+        { sig("item", "widget", 1) },
+        recipes,
+        nil,
+        RESEARCHED_ONLY,
+        { ["widget-pressing"] = true }
+      )
+      assert.are.equal("widget-pressing", out[1].name)
+    end)
+
+    it("filters combine", function()
+      local recipes = {
+        recipe("a-widget", { item("widget") }, { has_fluid_ingredient = true }),
+        recipe("b-widget", { item("widget") }),
+        recipe("c-widget", { item("widget") }),
+      }
+      local out = find(
+        { sig("item", "widget", 1) },
+        recipes,
+        nil,
+        { researched_only = true, no_fluid_inputs = true },
+        { ["a-widget"] = true, ["c-widget"] = true }
+      )
+      assert.are.equal("c-widget", out[1].name)
+    end)
   end)
 end)

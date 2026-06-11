@@ -113,6 +113,30 @@ local function machine_categories(machine_name)
   return proto and proto.crafting_categories or nil
 end
 
+-- Researched recipe names per force index, rebuilt lazily and invalidated
+-- on research changes. Derived deterministically from game state, so a
+-- module-local cache is multiplayer-safe.
+local researched_cache = {}
+local function researched_set(force)
+  local set = researched_cache[force.index]
+  if not set then
+    set = {}
+    for name, recipe in pairs(force.recipes) do
+      if recipe.enabled then
+        set[name] = true
+      end
+    end
+    researched_cache[force.index] = set
+  end
+  return set
+end
+
+--- Drop the force's cached researched set; the per-tick driver rebuilds it
+--- and rewrites any Recipe Finder output that changed.
+function selector_mode.on_research_changed(event)
+  researched_cache[event.research.force.index] = nil
+end
+
 local function machine_speed(machine_name)
   local proto = machine_name and prototypes.entity[machine_name]
   if not proto then
@@ -203,7 +227,22 @@ function selector_mode.set_recipe_finder(entity)
   if state.machine == nil then
     state.machine = preset.default_machine()
   end
+  if state.researched_only == nil then
+    state.researched_only = true
+  end
+  if state.no_fluid == nil then
+    state.no_fluid = false
+  end
   return state
+end
+
+--- Update a Recipe Finder Filter and force a rewrite on the next tick.
+function selector_mode.set_filter(entity, filter, value)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state[filter] = value
+    state.last_output = nil
+  end
 end
 
 function selector_mode.set_memory_cell(entity)
@@ -345,7 +384,16 @@ local function drive_recipe_finder(entity, state)
   local out = {}
   local categories = machine_categories(state.machine)
   if categories then
-    out = recipe_finder.find(merged_input_frame(entity), producer_index(), categories)
+    out = recipe_finder.find(
+      merged_input_frame(entity),
+      producer_index(),
+      categories,
+      {
+        researched_only = state.researched_only ~= false,
+        no_fluid_inputs = state.no_fluid == true,
+      },
+      researched_set(entity.force)
+    )
   end
   local current = signature(out)
   if current ~= state.last_output then

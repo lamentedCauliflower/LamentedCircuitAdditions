@@ -45,8 +45,8 @@ script.on_event(defines.events.on_gui_checked_state_changed, fan_out(cc_gui.on_c
 script.on_event(defines.events.on_gui_switch_state_changed, cc_gui.on_switch)
 script.on_event(defines.events.on_gui_value_changed, cc_gui.on_value_changed)
 script.on_event(defines.events.on_object_destroyed, fan_out(cc_gui.on_object_destroyed, sc_gui.on_object_destroyed))
-script.on_event(defines.events.on_research_finished, preset.on_research_changed)
-script.on_event(defines.events.on_research_reversed, preset.on_research_changed)
+script.on_event(defines.events.on_research_finished, fan_out(preset.on_research_changed, selector_mode.on_research_changed))
+script.on_event(defines.events.on_research_reversed, fan_out(preset.on_research_changed, selector_mode.on_research_changed))
 script.on_event(defines.events.on_gui_selection_state_changed, fan_out(cc_gui.on_selection, sc_gui.on_selection))
 script.on_event(defines.events.on_tick, fan_out(selector_mode.on_tick, persist.on_tick))
 
