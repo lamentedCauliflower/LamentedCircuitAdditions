@@ -13,3 +13,9 @@ README.md export-ignore
 .gitignore export-ignore
 .gitattributes export-ignore
 .releaserc export-ignore
+.busted export-ignore
+spec export-ignore
+docs export-ignore
+AGENTS.md export-ignore
+CONTEXT.md export-ignore
+.claude export-ignore
