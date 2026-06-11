@@ -4,6 +4,7 @@ local cc_gui = require("runtime.cc_gui")
 local sc_gui = require("runtime.sc_gui")
 local preset = require("runtime.preset")
 local selector_mode = require("runtime.selector_mode")
+local persist = require("runtime.persist")
 
 script.on_init(function()
   storage.cc_gui = {}
@@ -47,4 +48,26 @@ script.on_event(defines.events.on_object_destroyed, fan_out(cc_gui.on_object_des
 script.on_event(defines.events.on_research_finished, preset.on_research_changed)
 script.on_event(defines.events.on_research_reversed, preset.on_research_changed)
 script.on_event(defines.events.on_gui_selection_state_changed, fan_out(cc_gui.on_selection, sc_gui.on_selection))
-script.on_event(defines.events.on_tick, selector_mode.on_tick)
+script.on_event(defines.events.on_tick, fan_out(selector_mode.on_tick, persist.on_tick))
+
+-- Build-workflow persistence (#9): blueprints, revival, paste, clone, undo.
+local combinator_filter = {
+  { filter = "type", type = "constant-combinator" },
+  { filter = "type", type = "selector-combinator" },
+}
+script.on_event(defines.events.on_player_setup_blueprint, persist.on_setup_blueprint)
+script.on_event(defines.events.on_built_entity, persist.on_built, combinator_filter)
+script.on_event(defines.events.on_robot_built_entity, persist.on_built, combinator_filter)
+script.on_event(defines.events.on_space_platform_built_entity, persist.on_built, combinator_filter)
+script.on_event(defines.events.script_raised_revive, persist.on_built, combinator_filter)
+script.on_event(defines.events.script_raised_built, persist.on_built, combinator_filter)
+script.on_event(defines.events.on_entity_settings_pasted, persist.on_settings_pasted)
+script.on_event(defines.events.on_entity_cloned, persist.on_cloned, {
+  { filter = "type", type = "constant-combinator" },
+  { filter = "type", type = "selector-combinator" },
+  { filter = "name", name = "lca-hidden-output" },
+})
+script.on_event(defines.events.on_player_mined_entity, persist.on_player_mined, combinator_filter)
+script.on_event(defines.events.on_marked_for_deconstruction, persist.on_marked_for_deconstruction, combinator_filter)
+script.on_event(defines.events.on_undo_applied, persist.on_undo_applied)
+script.on_event(defines.events.on_redo_applied, persist.on_undo_applied)
