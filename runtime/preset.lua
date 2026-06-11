@@ -55,12 +55,14 @@ local function recipe_data()
         break
       end
     end
+    local main = proto.main_product
     list[#list + 1] = {
       name = name,
       category = proto.category,
       hidden = proto.hidden,
       parameter = proto.parameter,
       has_fluid_ingredient = has_fluid,
+      item_product = (main and main.type == "item") and main.name or nil,
     }
   end
   return list
@@ -132,10 +134,10 @@ function preset.restore_sections(cb, stash)
   end
 end
 
-local function to_filters(names, with_quality)
+local function to_filters(signals, with_quality)
   local out = {}
-  for i, name in ipairs(names) do
-    local value = { type = "recipe", name = name }
+  for i, signal in ipairs(signals) do
+    local value = { type = signal.type, name = signal.name }
     if with_quality then
       value.quality = "normal"
       value.comparator = "="
@@ -149,17 +151,17 @@ end
 --- mod-managed section. Returns the number of recipe signals written.
 function preset.apply(entity, state)
   local cb = entity.get_or_create_control_behavior()
-  local names = preset.compute(entity.force, state)
+  local signals = preset.compute(entity.force, state)
   clear_sections(cb)
   local section = cb.add_section()
   local ok = pcall(function()
-    section.filters = to_filters(names, true)
+    section.filters = to_filters(signals, true)
   end)
   if not ok then
-    section.filters = to_filters(names, false)
+    section.filters = to_filters(signals, false)
   end
   script.register_on_object_destroyed(entity)
-  return #names
+  return #signals
 end
 
 -- States saved before entity references were kept (or after surface
