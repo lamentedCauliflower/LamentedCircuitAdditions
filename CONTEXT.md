@@ -48,7 +48,11 @@ _Avoid_: latch, register
 
 **Update Condition**:
 A standard circuit condition (signal ▸ comparator ▸ signal-or-constant) evaluated
-against the Memory Cell's combined red+green input each tick.
+against the Memory Cell's combined red+green input each tick. Wildcard first
+signals follow decider semantics: Everything holds when every input signal passes
+(vacuously true on an empty input), Anything when at least one does; Each stores
+only the passing subset of the input instead of the whole frame. The GUI also
+offers a manual clear button for the Stored Frame.
 _Avoid_: write enable, trigger
 
 **Stored Frame**:

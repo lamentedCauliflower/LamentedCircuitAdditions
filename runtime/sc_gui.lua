@@ -288,17 +288,32 @@ local function build_crafting_time_panel(panel, state)
   }
 end
 
--- Update Condition row: signal | comparator | signal-or-constant.
+local WILDCARDS = { "signal-everything", "signal-anything", "signal-each" }
+
+-- Update Condition row: signal | comparator | signal-or-constant, plus a
+-- wildcard quick-select row (the plain signal chooser may not offer the
+-- special signals) and a manual clear button.
 local function build_memory_cell_panel(panel, state)
   panel.add{ type = "label", caption = { "lca-gui.update-condition" }, style = "semibold_label" }
   local condition = state.condition or {}
   local row = labeled_row(panel)
-  row.add{
-    type = "choose-elem-button",
-    elem_type = "signal",
-    signal = common.signal_to_elem(condition.first),
-    tags = { lca = "sc", action = "mc_first" },
-  }
+  -- The engine may reject wildcard SignalIDs on a chooser; fall back to
+  -- an empty chooser and let the pressed wildcard button show the state.
+  local ok = pcall(function()
+    row.add{
+      type = "choose-elem-button",
+      elem_type = "signal",
+      signal = common.signal_to_elem(condition.first),
+      tags = { lca = "sc", action = "mc_first" },
+    }
+  end)
+  if not ok then
+    row.add{
+      type = "choose-elem-button",
+      elem_type = "signal",
+      tags = { lca = "sc", action = "mc_first" },
+    }
+  end
   local comparator = comparator_of(condition.comparator or "<")
   local selected = 1
   for i, c in ipairs(COMPARATORS) do
@@ -329,6 +344,26 @@ local function build_memory_cell_panel(panel, state)
     tags = { lca = "sc", action = "mc_constant" },
   }
   constant.style.width = 60
+
+  local wildcard_row = labeled_row(panel)
+  for _, name in ipairs(WILDCARDS) do
+    local active = condition.first
+      and (condition.first.type or "item") == "virtual"
+      and condition.first.name == name
+    wildcard_row.add{
+      type = "sprite-button",
+      sprite = "virtual-signal/" .. name,
+      style = active and "slot_sized_button_pressed" or "slot_sized_button",
+      tooltip = { "virtual-signal-name." .. name },
+      tags = { lca = "sc", action = "mc_wildcard", name = name },
+    }
+  end
+
+  panel.add{
+    type = "button",
+    caption = { "lca-gui.clear-stored" },
+    tags = { lca = "sc", action = "mc_clear" },
+  }
 end
 
 local PANEL_BUILDERS = {
@@ -512,6 +547,18 @@ function sc_gui.on_click(event)
       entity.combinator_description = editor.children[2].description_box.text
       editor.destroy()
     end
+  elseif action == "mc_clear" then
+    selector_mode.clear_memory(entity)
+  elseif action == "mc_wildcard" then
+    local condition = condition_of(entity)
+    if condition then
+      local already = condition.first
+        and (condition.first.type or "item") == "virtual"
+        and condition.first.name == tags.name
+      -- Clicking the active wildcard deselects it.
+      condition.first = not already and { type = "virtual", name = tags.name } or nil
+      reopen(player, entity)
+    end
   end
 end
 
@@ -594,6 +641,8 @@ function sc_gui.on_elem_changed(event)
     local condition = condition_of(entity)
     if condition then
       condition.first = elem_to_signal(sig)
+      -- Refresh the wildcard buttons' pressed state.
+      reopen(player, entity)
     end
   elseif action == "mc_second" then
     local condition = condition_of(entity)

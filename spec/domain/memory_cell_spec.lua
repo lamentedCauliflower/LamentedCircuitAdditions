@@ -54,6 +54,67 @@ describe("domain.memory_cell.condition_holds", function()
   end)
 end)
 
+describe("domain.memory_cell wildcards", function()
+  local ALL = { type = "virtual", name = "signal-everything" }
+  local ANY = { type = "virtual", name = "signal-anything" }
+  local EACH = { type = "virtual", name = "signal-each" }
+  local stored = { sig("item", "copper-plate", 7) }
+
+  it("Everything stores when every input signal passes", function()
+    local frame = { sig("virtual", "signal-A", 5), sig("item", "iron-plate", 3) }
+    assert.are.equal(frame, memory_cell.step(stored, frame,
+      { first = ALL, comparator = ">", constant = 0 }))
+  end)
+
+  it("Everything holds when any input signal fails", function()
+    local frame = { sig("virtual", "signal-A", 5), sig("item", "iron-plate", -1) }
+    assert.are.equal(stored, memory_cell.step(stored, frame,
+      { first = ALL, comparator = ">", constant = 0 }))
+  end)
+
+  it("Everything is vacuously true on an empty input, clearing the cell", function()
+    assert.are.same({}, memory_cell.step(stored, {},
+      { first = ALL, comparator = ">", constant = 0 }))
+  end)
+
+  it("Anything stores the full frame when at least one signal passes", function()
+    local frame = { sig("virtual", "signal-A", -5), sig("item", "iron-plate", 3) }
+    assert.are.equal(frame, memory_cell.step(stored, frame,
+      { first = ANY, comparator = ">", constant = 0 }))
+  end)
+
+  it("Anything holds when no signal passes, including on empty input", function()
+    local frame = { sig("virtual", "signal-A", -5) }
+    assert.are.equal(stored, memory_cell.step(stored, frame,
+      { first = ANY, comparator = ">", constant = 0 }))
+    assert.are.equal(stored, memory_cell.step(stored, {},
+      { first = ANY, comparator = "=", constant = 0 }))
+  end)
+
+  it("Each stores only the passing subset", function()
+    local a = sig("virtual", "signal-A", 5)
+    local b = sig("item", "iron-plate", -1)
+    local c = sig("item", "copper-cable", 2)
+    local result = memory_cell.step(stored, { a, b, c },
+      { first = EACH, comparator = ">", constant = 0 })
+    assert.are.same({ a, c }, result)
+  end)
+
+  it("Each holds when nothing passes", function()
+    local frame = { sig("item", "iron-plate", -1) }
+    assert.are.equal(stored, memory_cell.step(stored, frame,
+      { first = EACH, comparator = ">", constant = 0 }))
+  end)
+
+  it("wildcards compare against a second signal from the frame", function()
+    local frame = { sig("virtual", "signal-A", 5), sig("item", "iron-plate", 3) }
+    -- Each signal > iron-plate(3): only A passes.
+    local result = memory_cell.step(stored, frame,
+      { first = EACH, comparator = ">", second = { type = "item", name = "iron-plate" } })
+    assert.are.same({ frame[1] }, result)
+  end)
+end)
+
 describe("domain.memory_cell.step", function()
   local TRUE_CONDITION = { first = W, comparator = ">", constant = 0 }
   local stored = { sig("item", "copper-plate", 7) }

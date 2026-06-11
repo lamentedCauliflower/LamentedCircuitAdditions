@@ -151,6 +151,16 @@ function selector_mode.set_vanilla(entity)
   all[entity.unit_number] = nil
 end
 
+--- Manually clear the Memory Cell's Stored Frame.
+function selector_mode.clear_memory(entity)
+  local state = mode_states()[entity.unit_number]
+  if state and state.mode == selector_mode.MODE_MEMORY_CELL then
+    state.stored = {}
+    -- Force a rewrite on the next tick.
+    state.last_output = nil
+  end
+end
+
 function selector_mode.set_machine(entity, machine_name)
   local state = mode_states()[entity.unit_number]
   if state then

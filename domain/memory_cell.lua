@@ -19,48 +19,97 @@ local function key(signal)
   return (signal.type or "item") .. "/" .. signal.name .. "/" .. (signal.quality or "normal")
 end
 
---- Evaluate the Update Condition against a combined input frame.
---- Signals absent from the frame count as 0; without a first signal the
---- condition never holds.
+local WILDCARDS = {
+  ["signal-everything"] = "everything",
+  ["signal-anything"] = "anything",
+  ["signal-each"] = "each",
+}
+
+local function wildcard_of(signal)
+  if signal and (signal.type or "item") == "virtual" then
+    return WILDCARDS[signal.name]
+  end
+  return nil
+end
+
+--- Evaluate the Update Condition against a combined input frame and
+--- decide what to store. Signals absent from the frame count as 0;
+--- without a first signal the condition never holds.
+--- Wildcard first signals follow decider semantics: Everything holds
+--- when every input signal passes (vacuously true on an empty input),
+--- Anything when at least one does. Each stores only the passing subset
+--- of the input rather than the whole frame.
 --- @param frame table[] combined input signals: { type, name, quality, count }
 --- @param condition table { first = signal?, comparator = string,
 ---   second = signal?, constant = number? } (second beats constant)
---- @return boolean
-function memory_cell.condition_holds(frame, condition)
+--- @return table[]? the frame to store, or nil when the condition holds nothing
+function memory_cell.evaluate(frame, condition)
   if not (condition and condition.first) then
-    return false
+    return nil
   end
   local compare = COMPARE[condition.comparator or "<"]
   if not compare then
-    return false
+    return nil
   end
   local lookup = {}
   for _, signal in ipairs(frame) do
     lookup[key(signal)] = signal.count
   end
-  local left = lookup[key(condition.first)] or 0
   local right
   if condition.second then
     right = lookup[key(condition.second)] or 0
   else
     right = condition.constant or 0
   end
-  return compare(left, right)
+  local wildcard = wildcard_of(condition.first)
+  if wildcard == "everything" then
+    for _, signal in ipairs(frame) do
+      if not compare(signal.count, right) then
+        return nil
+      end
+    end
+    return frame
+  elseif wildcard == "anything" then
+    for _, signal in ipairs(frame) do
+      if compare(signal.count, right) then
+        return frame
+      end
+    end
+    return nil
+  elseif wildcard == "each" then
+    local passing = {}
+    for _, signal in ipairs(frame) do
+      if compare(signal.count, right) then
+        passing[#passing + 1] = signal
+      end
+    end
+    if #passing > 0 then
+      return passing
+    end
+    return nil
+  end
+  local left = lookup[key(condition.first)] or 0
+  if compare(left, right) then
+    return frame
+  end
+  return nil
+end
+
+--- Whether the Update Condition holds (would store something).
+function memory_cell.condition_holds(frame, condition)
+  return memory_cell.evaluate(frame, condition) ~= nil
 end
 
 --- One tick of the Memory Cell. Level-triggered: while the condition
---- holds, the Stored Frame is replaced by the entire input frame (an
---- empty input clears the cell); otherwise the Stored Frame is kept.
---- Returns the input frame table itself when storing.
+--- holds, the Stored Frame is replaced by what evaluate() yields (the
+--- entire input, or the passing subset under Each; an empty input under
+--- Everything clears the cell); otherwise the Stored Frame is kept.
 --- @param stored table[] the current Stored Frame
 --- @param frame table[] combined input signals
 --- @param condition table the Update Condition
 --- @return table[] the new Stored Frame
 function memory_cell.step(stored, frame, condition)
-  if memory_cell.condition_holds(frame, condition) then
-    return frame
-  end
-  return stored
+  return memory_cell.evaluate(frame, condition) or stored
 end
 
 return memory_cell
