@@ -264,6 +264,7 @@ end
 function cc_gui.open(player, entity)
   cc_gui.close(player)
   states()[player.index] = { entity = entity }
+  script.register_on_object_destroyed(entity)
 
   local frame = player.gui.screen.add{ type = "frame", name = FRAME_NAME, direction = "vertical" }
   frame.style.maximal_height = 800
@@ -628,6 +629,19 @@ function cc_gui.on_selection(event)
     end
     states()[player.index].edit_section = nil
     cc_gui.rebuild_sections(player)
+  end
+end
+
+-- Close every window still pointing at a combinator that no longer exists
+-- (mined, destroyed, killed by script — anything).
+function cc_gui.on_object_destroyed(_)
+  for player_index, state in pairs(states()) do
+    if not (state.entity and state.entity.valid) then
+      local player = game.get_player(player_index)
+      if player then
+        cc_gui.close(player)
+      end
+    end
   end
 end
 
