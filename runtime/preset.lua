@@ -14,7 +14,8 @@ local function mode_states()
   return storage.cc_modes
 end
 
-local function default_machine()
+-- Shared with the selector Modes as the initial Target Machine.
+function preset.default_machine()
   if prototypes.entity["assembling-machine-1"] then
     return "assembling-machine-1"
   end
@@ -215,7 +216,7 @@ function preset.set_mode(entity, mode)
     state.stash = preset.stash_sections(cb)
     state.mode = mode
     if state.machine == nil then
-      state.machine = default_machine()
+      state.machine = preset.default_machine()
     end
     if state.researched_only == nil then
       state.researched_only = true

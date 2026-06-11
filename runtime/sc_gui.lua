@@ -4,6 +4,7 @@
 -- dropdown is where the mod's selector Modes get appended later.
 
 local common = require("runtime.gui_common")
+local selector_mode = require("runtime.selector_mode")
 
 local FRAME_NAME = "lca_sc_frame"
 local DESCRIPTION_EDITOR_NAME = "lca_sc_description_editor"
@@ -23,6 +24,9 @@ local OP_INDEX = {}
 for i, op in ipairs(OPERATIONS) do
   OP_INDEX[op] = i
 end
+
+-- Script-driven Modes appended after the vanilla operations.
+local CT_DROPDOWN_INDEX = #OPERATIONS + 1
 
 -- Vanilla circuit-condition comparator order; the engine reports the
 -- canonical single-character forms.
@@ -257,6 +261,19 @@ local function build_quality_filter_panel(panel, params)
   add_quality_dropdown(row, qf.quality, "qf_quality", true)
 end
 
+local function build_crafting_time_panel(panel, state)
+  local row = labeled_row(panel)
+  row.add{ type = "label", caption = { "lca-gui.machine" }, style = "semibold_label" }
+  row.add{
+    type = "choose-elem-button",
+    elem_type = "entity",
+    entity = state.machine,
+    elem_filters = { { filter = "crafting-machine" } },
+    tooltip = { "lca-gui.machine-tooltip" },
+    tags = { lca = "sc", action = "ct_machine" },
+  }
+end
+
 local PANEL_BUILDERS = {
   ["select"] = build_select_panel,
   ["count"] = build_count_panel,
@@ -305,28 +322,39 @@ function sc_gui.open(player, entity)
 
   local params = parameters(entity)
   local op = params.operation or "select"
+  local mode_state = selector_mode.state_of(entity)
+  local in_ct = mode_state and mode_state.mode == selector_mode.MODE_CRAFTING_TIME
 
   local items = {}
   for i, name in ipairs(OPERATIONS) do
     items[i] = { "gui-selector." .. name }
   end
+  items[CT_DROPDOWN_INDEX] = { "lca-gui.mode-crafting-time" }
   local dropdown = inner.add{
     type = "drop-down",
     items = items,
-    selected_index = OP_INDEX[op] or 1,
+    selected_index = in_ct and CT_DROPDOWN_INDEX or OP_INDEX[op] or 1,
     tags = { lca = "sc", action = "operation" },
   }
   dropdown.style.horizontally_stretchable = true
 
-  local description = inner.add{ type = "label", caption = { "gui-selector." .. op .. "-description" } }
+  local description = inner.add{
+    type = "label",
+    caption = in_ct and { "lca-gui.mode-crafting-time-description" }
+      or { "gui-selector." .. op .. "-description" },
+  }
   description.style.single_line = false
   description.style.maximal_width = 400
 
   local panel = inner.add{ type = "flow", name = "panel", direction = "vertical" }
   panel.style.vertical_spacing = 8
-  local builder = PANEL_BUILDERS[op]
-  if builder then
-    builder(panel, params)
+  if in_ct then
+    build_crafting_time_panel(panel, mode_state)
+  else
+    local builder = PANEL_BUILDERS[op]
+    if builder then
+      builder(panel, params)
+    end
   end
 
   inner.add{
@@ -425,9 +453,14 @@ function sc_gui.on_selection(event)
   local action = tags.action
   local index = event.element.selected_index
   if action == "operation" then
-    update_parameters(player, entity, function(p)
-      p.operation = OPERATIONS[index] or "select"
-    end)
+    if index == CT_DROPDOWN_INDEX then
+      selector_mode.set_crafting_time(entity)
+    else
+      selector_mode.set_vanilla(entity)
+      update_parameters(player, entity, function(p)
+        p.operation = OPERATIONS[index] or "select"
+      end)
+    end
     reopen(player, entity)
   elseif action == "qf_comparator" then
     update_parameters(player, entity, function(p)
@@ -478,7 +511,9 @@ function sc_gui.on_elem_changed(event)
   end
   local action = tags.action
   local sig = event.element.elem_value
-  if action == "index_signal" then
+  if action == "ct_machine" then
+    selector_mode.set_machine(entity, sig)
+  elseif action == "index_signal" then
     update_parameters(player, entity, function(p)
       p.index_signal = sig
     end)
@@ -518,8 +553,12 @@ function sc_gui.on_text_changed(event)
   end
 end
 
--- Close every window still pointing at a combinator that no longer exists.
+-- Close every window still pointing at a combinator that no longer exists,
+-- and tear down the destroyed combinator's script Mode (hidden output).
 function sc_gui.on_object_destroyed(event)
+  if event.type == defines.target_type.entity and event.useful_id then
+    selector_mode.forget(event.useful_id)
+  end
   for player_index, state in pairs(states()) do
     if not (state.entity and state.entity.valid) then
       local player = game.get_player(player_index)

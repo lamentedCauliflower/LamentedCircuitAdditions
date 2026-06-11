@@ -3,11 +3,13 @@
 local cc_gui = require("runtime.cc_gui")
 local sc_gui = require("runtime.sc_gui")
 local preset = require("runtime.preset")
+local selector_mode = require("runtime.selector_mode")
 
 script.on_init(function()
   storage.cc_gui = {}
   storage.cc_modes = {}
   storage.sc_gui = {}
+  storage.sc_modes = {}
 end)
 
 script.on_event(defines.events.on_gui_opened, function(event)
@@ -45,3 +47,4 @@ script.on_event(defines.events.on_object_destroyed, fan_out(cc_gui.on_object_des
 script.on_event(defines.events.on_research_finished, preset.on_research_changed)
 script.on_event(defines.events.on_research_reversed, preset.on_research_changed)
 script.on_event(defines.events.on_gui_selection_state_changed, fan_out(cc_gui.on_selection, sc_gui.on_selection))
+script.on_event(defines.events.on_tick, selector_mode.on_tick)
