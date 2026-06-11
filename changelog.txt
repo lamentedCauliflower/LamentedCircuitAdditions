@@ -1,0 +1,25 @@
+---------------------------------------------------------------------------------------------------
+Version: 1.0.0
+Date: 2026-06-11
+  Info:
+    - fill mod metadata and locale strings
+  Features:
+    - auto-refresh researched-only Presets on research changes
+    - Craftable Set Preset Mode for the constant combinator
+    - Crafting-Time Mode for the selector combinator
+    - emit item signals from Presets when recipes have item products
+    - Memory Cell Mode for the selector combinator
+    - persist mod settings through blueprints, paste, clone and undo
+    - replace the selector combinator GUI with the unified Mode dropdown
+    - wildcard Update Conditions and a manual clear for the Memory Cell
+  Gui:
+    - close combinator window when the entity is destroyed
+    - replace constant combinator GUI (Vanilla Mode only)
+    - reproduce vanilla 2.0 constant combinator window faithfully
+    - rework sections editor around 2.0 logistic groups
+  Bugfixes:
+    - pin item signal quality when setting slot filters
+    - selector GUI index display, quality read-back, quality_filter writes
+    - write quality_source_static as a name table so the engine keeps it
+  Changes:
+    - add pure domain core, busted suite and CI test workflow
