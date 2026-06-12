@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.0
+Date: 2026-06-12
+  Features:
+    - collision summing and quality propagation for Recipe Products
+    - Filters and research reactivity for the Recipe Finder
+    - Recipe Finder Mode for the selector combinator
+    - Recipe Products and Recipe Finder Modes for the selector combinator ([#10](https://github.com/lamentedCauliflower/LamentedCircuitAdditions/issues/10))
+    - Recipe Products Mode for the selector combinator
+---------------------------------------------------------------------------------------------------
 Version: 1.0.0
 Date: 2026-06-11
   Info:
