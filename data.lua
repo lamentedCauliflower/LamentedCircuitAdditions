@@ -27,4 +27,33 @@ hidden.activity_led_sprites = util.empty_sprite()
 hidden.draw_circuit_wires = false
 hidden.created_smoke = nil
 
-data:extend{ hidden }
+-- Invisible arithmetic combinator that watches a script-Mode selector's
+-- input networks and folds them into one sentinel signal (each XOR K -> S).
+-- The engine recomputes it event-driven, so the per-tick driver can detect
+-- input changes with a single scalar read instead of copying every signal.
+-- Void energy: it must keep working on unpowered grids.
+local sentinel = util.table.deepcopy(data.raw["arithmetic-combinator"]["arithmetic-combinator"])
+sentinel.name = "lca-hidden-sentinel"
+sentinel.hidden = true
+sentinel.flags = {
+  "placeable-off-grid",
+  "not-on-map",
+  "not-blueprintable",
+  "not-deconstructable",
+  "hide-alt-info",
+  "not-upgradable",
+  "no-copy-paste",
+  "not-selectable-in-game",
+}
+sentinel.minable = nil
+sentinel.selectable_in_game = false
+sentinel.selection_box = nil
+sentinel.collision_box = { { 0, 0 }, { 0, 0 } }
+sentinel.collision_mask = { layers = {} }
+sentinel.energy_source = { type = "void" }
+sentinel.sprites = util.empty_sprite()
+sentinel.activity_led_sprites = util.empty_sprite()
+sentinel.draw_circuit_wires = false
+sentinel.created_smoke = nil
+
+data:extend{ hidden, sentinel }

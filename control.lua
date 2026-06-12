@@ -13,6 +13,20 @@ script.on_init(function()
   storage.sc_modes = {}
 end)
 
+script.on_configuration_changed(function()
+  -- Saves from before the per-tick driver's change gating: deactivate the
+  -- parked selectors (the hidden output carries the signals) and drop the
+  -- old signature strings so every combinator rewrites once.
+  for _, state in pairs(storage.sc_modes or {}) do
+    local entity = state.entity
+    if entity and entity.valid then
+      entity.active = false
+    end
+    state.last_output = nil
+    state.last_input = nil
+  end
+end)
+
 script.on_event(defines.events.on_gui_opened, function(event)
   if event.gui_type ~= defines.gui_type.entity then
     return
@@ -66,8 +80,10 @@ script.on_event(defines.events.on_entity_cloned, persist.on_cloned, {
   { filter = "type", type = "constant-combinator" },
   { filter = "type", type = "selector-combinator" },
   { filter = "name", name = "lca-hidden-output" },
+  { filter = "name", name = "lca-hidden-sentinel" },
 })
 script.on_event(defines.events.on_player_mined_entity, persist.on_player_mined, combinator_filter)
 script.on_event(defines.events.on_marked_for_deconstruction, persist.on_marked_for_deconstruction, combinator_filter)
 script.on_event(defines.events.on_undo_applied, persist.on_undo_applied)
 script.on_event(defines.events.on_redo_applied, persist.on_undo_applied)
+
