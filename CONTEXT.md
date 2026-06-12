@@ -40,6 +40,30 @@ signal valued at its crafting time in ticks on the Target Machine
 values are ignored (any nonzero value is a presence flag).
 _Avoid_: recipe time, duration mode
 
+**Recipe Products Mode**:
+A selector combinator Mode that maps each input recipe signal to that recipe's
+product signals at nominal per-craft amounts (probabilities ignored; amount ranges
+use the rounded average). Input values are ignored (any nonzero value is a presence
+flag); non-recipe inputs and unknown recipes are dropped. A product shared by
+several input recipes sums its amounts. Item products inherit the input recipe
+signal's quality; fluid products are always normal. Takes no Target Machine —
+products are machine-independent.
+_Avoid_: unpack, output mode
+
+**Recipe Finder Mode**:
+A selector combinator Mode that maps each input item or fluid signal to the
+Primary Recipe producing it on the Target Machine, passing the input value
+through. Filters apply as in the Craftable Set; inputs with no qualifying
+producer (and non-item/fluid inputs) are dropped. The output recipe signal
+inherits the input signal's quality.
+_Avoid_: reverse lookup, producer mode
+
+**Primary Recipe**:
+Among the Target Machine's qualifying producers of an item or fluid: the recipe
+named exactly like it; else the recipe whose main product it is; else the
+alphabetically first producer.
+_Avoid_: best recipe, default recipe
+
 **Memory Cell**:
 A selector combinator Mode that holds a Stored Frame and outputs it continuously.
 Level-triggered: every tick the Update Condition holds, the Stored Frame is replaced

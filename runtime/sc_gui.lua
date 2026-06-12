@@ -28,6 +28,8 @@ end
 -- Script-driven Modes appended after the vanilla operations.
 local CT_DROPDOWN_INDEX = #OPERATIONS + 1
 local MC_DROPDOWN_INDEX = #OPERATIONS + 2
+local RP_DROPDOWN_INDEX = #OPERATIONS + 3
+local RF_DROPDOWN_INDEX = #OPERATIONS + 4
 
 -- Vanilla circuit-condition comparator order; the engine reports the
 -- canonical single-character forms.
@@ -275,7 +277,9 @@ local function build_quality_filter_panel(panel, params)
   add_quality_dropdown(row, qf.quality, "qf_quality", true)
 end
 
-local function build_crafting_time_panel(panel, state)
+-- Target Machine picker row, shared by the Modes computed against a
+-- machine; set_machine routes by the combinator's state.
+local function build_machine_panel(panel, state, tooltip)
   local row = labeled_row(panel)
   row.add{ type = "label", caption = { "lca-gui.machine" }, style = "semibold_label" }
   row.add{
@@ -283,8 +287,25 @@ local function build_crafting_time_panel(panel, state)
     elem_type = "entity",
     entity = state.machine,
     elem_filters = { { filter = "crafting-machine" } },
-    tooltip = { "lca-gui.machine-tooltip" },
+    tooltip = tooltip,
     tags = { lca = "sc", action = "ct_machine" },
+  }
+end
+
+-- Recipe Finder: Target Machine picker plus the two Filters.
+local function build_recipe_finder_panel(panel, state)
+  build_machine_panel(panel, state, { "lca-gui.machine-tooltip-recipe-finder" })
+  panel.add{
+    type = "checkbox",
+    state = state.researched_only ~= false,
+    caption = { "lca-gui.researched-only" },
+    tags = { lca = "sc", action = "rf_researched" },
+  }
+  panel.add{
+    type = "checkbox",
+    state = state.no_fluid == true,
+    caption = { "lca-gui.no-fluid-inputs" },
+    tags = { lca = "sc", action = "rf_no_fluid" },
   }
 end
 
@@ -418,6 +439,8 @@ function sc_gui.open(player, entity)
   local script_mode = mode_state and mode_state.mode
   local in_ct = script_mode == selector_mode.MODE_CRAFTING_TIME
   local in_mc = script_mode == selector_mode.MODE_MEMORY_CELL
+  local in_rp = script_mode == selector_mode.MODE_RECIPE_PRODUCTS
+  local in_rf = script_mode == selector_mode.MODE_RECIPE_FINDER
 
   local items = {}
   for i, name in ipairs(OPERATIONS) do
@@ -425,11 +448,17 @@ function sc_gui.open(player, entity)
   end
   items[CT_DROPDOWN_INDEX] = { "lca-gui.mode-crafting-time" }
   items[MC_DROPDOWN_INDEX] = { "lca-gui.mode-memory-cell" }
+  items[RP_DROPDOWN_INDEX] = { "lca-gui.mode-recipe-products" }
+  items[RF_DROPDOWN_INDEX] = { "lca-gui.mode-recipe-finder" }
   local selected_index = OP_INDEX[op] or 1
   if in_ct then
     selected_index = CT_DROPDOWN_INDEX
   elseif in_mc then
     selected_index = MC_DROPDOWN_INDEX
+  elseif in_rp then
+    selected_index = RP_DROPDOWN_INDEX
+  elseif in_rf then
+    selected_index = RF_DROPDOWN_INDEX
   end
   local dropdown = inner.add{
     type = "drop-down",
@@ -444,6 +473,10 @@ function sc_gui.open(player, entity)
     description_caption = { "lca-gui.mode-crafting-time-description" }
   elseif in_mc then
     description_caption = { "lca-gui.mode-memory-cell-description" }
+  elseif in_rp then
+    description_caption = { "lca-gui.mode-recipe-products-description" }
+  elseif in_rf then
+    description_caption = { "lca-gui.mode-recipe-finder-description" }
   end
   local description = inner.add{ type = "label", caption = description_caption }
   description.style.single_line = false
@@ -452,10 +485,13 @@ function sc_gui.open(player, entity)
   local panel = inner.add{ type = "flow", name = "panel", direction = "vertical" }
   panel.style.vertical_spacing = 8
   if in_ct then
-    build_crafting_time_panel(panel, mode_state)
+    build_machine_panel(panel, mode_state, { "lca-gui.machine-tooltip-crafting-time" })
+  elseif in_rf then
+    build_recipe_finder_panel(panel, mode_state)
   elseif in_mc then
     build_memory_cell_panel(panel, mode_state)
-  else
+  elseif not in_rp then
+    -- Recipe Products has no settings.
     local builder = PANEL_BUILDERS[op]
     if builder then
       builder(panel, params)
@@ -574,6 +610,10 @@ function sc_gui.on_selection(event)
       selector_mode.set_crafting_time(entity)
     elseif index == MC_DROPDOWN_INDEX then
       selector_mode.set_memory_cell(entity)
+    elseif index == RP_DROPDOWN_INDEX then
+      selector_mode.set_recipe_products(entity)
+    elseif index == RF_DROPDOWN_INDEX then
+      selector_mode.set_recipe_finder(entity)
     else
       selector_mode.set_vanilla(entity)
       update_parameters(player, entity, function(p)
@@ -615,7 +655,11 @@ function sc_gui.on_checked(event)
   if not player then
     return
   end
-  if tags.action == "select_sort" then
+  if tags.action == "rf_researched" then
+    selector_mode.set_filter(entity, "researched_only", event.element.state)
+  elseif tags.action == "rf_no_fluid" then
+    selector_mode.set_filter(entity, "no_fluid", event.element.state)
+  elseif tags.action == "select_sort" then
     update_parameters(player, entity, function(p)
       p.select_max = tags.max
     end)

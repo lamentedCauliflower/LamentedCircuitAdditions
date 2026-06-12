@@ -8,12 +8,16 @@
 
 local crafting_time = require("domain.crafting_time")
 local memory_cell = require("domain.memory_cell")
+local recipe_products = require("domain.recipe_products")
+local recipe_finder = require("domain.recipe_finder")
 local preset = require("runtime.preset")
 
 local selector_mode = {}
 
 selector_mode.MODE_CRAFTING_TIME = "crafting-time"
 selector_mode.MODE_MEMORY_CELL = "memory-cell"
+selector_mode.MODE_RECIPE_PRODUCTS = "recipe-products"
+selector_mode.MODE_RECIPE_FINDER = "recipe-finder"
 
 local OUTPUT_ENTITY = "lca-hidden-output"
 local INT32_MIN, INT32_MAX = -2147483648, 2147483647
@@ -40,6 +44,97 @@ local function energies()
     end
   end
   return energy_cache
+end
+
+-- Item and fluid products per recipe with their raw amount fields, rebuilt
+-- once per load from prototypes (deterministic, multiplayer-safe). The
+-- nominal-amount rule lives in the domain module.
+local products_cache
+local function products()
+  if not products_cache then
+    products_cache = {}
+    for name, proto in pairs(prototypes.recipe) do
+      local list = {}
+      for _, product in ipairs(proto.products or {}) do
+        if product.type == "item" or product.type == "fluid" then
+          list[#list + 1] = {
+            type = product.type,
+            name = product.name,
+            amount = product.amount,
+            amount_min = product.amount_min,
+            amount_max = product.amount_max,
+          }
+        end
+      end
+      products_cache[name] = list
+    end
+  end
+  return products_cache
+end
+
+-- Producer index for the Recipe Finder, rebuilt once per load from
+-- prototypes (deterministic, multiplayer-safe).
+local finder_index
+local function producer_index()
+  if not finder_index then
+    local recipes = {}
+    for name, proto in pairs(prototypes.recipe) do
+      local product_list = {}
+      for _, product in ipairs(proto.products or {}) do
+        if product.type == "item" or product.type == "fluid" then
+          product_list[#product_list + 1] = { type = product.type, name = product.name }
+        end
+      end
+      local main = proto.main_product
+      local has_fluid = false
+      for _, ingredient in pairs(proto.ingredients or {}) do
+        if ingredient.type == "fluid" then
+          has_fluid = true
+          break
+        end
+      end
+      recipes[#recipes + 1] = {
+        name = name,
+        category = proto.category,
+        hidden = proto.hidden,
+        parameter = proto.parameter,
+        has_fluid_ingredient = has_fluid,
+        products = product_list,
+        main_product = main and { type = main.type, name = main.name } or nil,
+      }
+    end
+    finder_index = recipe_finder.index(recipes)
+  end
+  return finder_index
+end
+
+local function machine_categories(machine_name)
+  local proto = machine_name and prototypes.entity[machine_name]
+  return proto and proto.crafting_categories or nil
+end
+
+-- Researched recipe names per force index, rebuilt lazily and invalidated
+-- on research changes. Derived deterministically from game state, so a
+-- module-local cache is multiplayer-safe.
+local researched_cache = {}
+local function researched_set(force)
+  local set = researched_cache[force.index]
+  if not set then
+    set = {}
+    for name, recipe in pairs(force.recipes) do
+      if recipe.enabled then
+        set[name] = true
+      end
+    end
+    researched_cache[force.index] = set
+  end
+  return set
+end
+
+--- Drop the force's cached researched set; the per-tick driver rebuilds it
+--- and rewrites any Recipe Finder output that changed.
+function selector_mode.on_research_changed(event)
+  researched_cache[event.research.force.index] = nil
 end
 
 local function machine_speed(machine_name)
@@ -121,6 +216,33 @@ function selector_mode.set_crafting_time(entity)
     state.machine = preset.default_machine()
   end
   return state
+end
+
+function selector_mode.set_recipe_products(entity)
+  return enter_script_mode(entity, selector_mode.MODE_RECIPE_PRODUCTS)
+end
+
+function selector_mode.set_recipe_finder(entity)
+  local state = enter_script_mode(entity, selector_mode.MODE_RECIPE_FINDER)
+  if state.machine == nil then
+    state.machine = preset.default_machine()
+  end
+  if state.researched_only == nil then
+    state.researched_only = true
+  end
+  if state.no_fluid == nil then
+    state.no_fluid = false
+  end
+  return state
+end
+
+--- Update a Recipe Finder Filter and force a rewrite on the next tick.
+function selector_mode.set_filter(entity, filter, value)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state[filter] = value
+    state.last_output = nil
+  end
 end
 
 function selector_mode.set_memory_cell(entity)
@@ -249,6 +371,37 @@ local function drive_crafting_time(entity, state)
   end
 end
 
+local function drive_recipe_products(entity, state)
+  local out = recipe_products.map(merged_input_frame(entity), products())
+  local current = signature(out)
+  if current ~= state.last_output then
+    state.last_output = current
+    write_output(entity, state, out)
+  end
+end
+
+local function drive_recipe_finder(entity, state)
+  local out = {}
+  local categories = machine_categories(state.machine)
+  if categories then
+    out = recipe_finder.find(
+      merged_input_frame(entity),
+      producer_index(),
+      categories,
+      {
+        researched_only = state.researched_only ~= false,
+        no_fluid_inputs = state.no_fluid == true,
+      },
+      researched_set(entity.force)
+    )
+  end
+  local current = signature(out)
+  if current ~= state.last_output then
+    state.last_output = current
+    write_output(entity, state, out)
+  end
+end
+
 local function drive_memory_cell(entity, state)
   state.stored = memory_cell.step(state.stored or {}, merged_input_frame(entity), state.condition)
   local current = signature(state.stored)
@@ -261,6 +414,8 @@ end
 local DRIVERS = {
   [selector_mode.MODE_CRAFTING_TIME] = drive_crafting_time,
   [selector_mode.MODE_MEMORY_CELL] = drive_memory_cell,
+  [selector_mode.MODE_RECIPE_PRODUCTS] = drive_recipe_products,
+  [selector_mode.MODE_RECIPE_FINDER] = drive_recipe_finder,
 }
 
 function selector_mode.on_tick()
