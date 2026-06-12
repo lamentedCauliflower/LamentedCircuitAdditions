@@ -10,6 +10,7 @@ local selector_mode = require("runtime.selector_mode")
 local persist = {}
 
 local OUTPUT_ENTITY = "lca-hidden-output"
+local SENTINEL_ENTITY = "lca-hidden-sentinel"
 
 -- Deep copy for plain config tables (drops userdata, which tags reject).
 local function copy(value)
@@ -182,9 +183,9 @@ function persist.on_cloned(event)
   if not (dest and dest.valid) then
     return
   end
-  if dest.name == OUTPUT_ENTITY then
-    -- Area clones duplicate the hidden output; the owning selector
-    -- recreates its own, so the stray copy goes.
+  if dest.name == OUTPUT_ENTITY or dest.name == SENTINEL_ENTITY then
+    -- Area clones duplicate the hidden helpers; the owning selector
+    -- recreates its own, so the stray copies go.
     dest.destroy()
     return
   end

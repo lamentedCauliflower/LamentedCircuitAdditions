@@ -1,0 +1,9 @@
+{
+  "seed": 42,
+  "width": 0,
+  "height": 0,
+  "peaceful_mode": true,
+  "autoplace_controls": {
+    "enemy-base": { "frequency": 0, "size": 0, "richness": 0 }
+  }
+}

@@ -140,10 +140,16 @@ local function elem_to_signal(sig)
   return { type = sig.type or "item", name = sig.name, quality = sig.quality }
 end
 
--- The Memory Cell's Update Condition, when that Mode is active.
+-- The Memory Cell's Update Condition for editing, when that Mode is active.
+-- Marks the state dirty: every caller mutates the condition in place, and
+-- the per-tick driver only recomputes when input or config changed.
 local function condition_of(entity)
   local state = selector_mode.state_of(entity)
-  return state and state.mode == selector_mode.MODE_MEMORY_CELL and state.condition or nil
+  if state and state.mode == selector_mode.MODE_MEMORY_CELL and state.condition then
+    state.last_output = nil
+    return state.condition
+  end
+  return nil
 end
 
 local function labeled_row(parent)
