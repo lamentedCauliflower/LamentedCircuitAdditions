@@ -19,3 +19,6 @@ docs export-ignore
 AGENTS.md export-ignore
 CONTEXT.md export-ignore
 .claude export-ignore
+
+# benchmark tooling: the mod portal rejects script files in packages
+bench export-ignore
