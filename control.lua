@@ -87,3 +87,47 @@ script.on_event(defines.events.on_marked_for_deconstruction, persist.on_marked_f
 script.on_event(defines.events.on_undo_applied, persist.on_undo_applied)
 script.on_event(defines.events.on_redo_applied, persist.on_undo_applied)
 
+-- Scripting API: configure a selector combinator's Mode without the GUI.
+-- Lets other mods and headless tooling (bench/, tests) drive the mod.
+remote.add_interface("lamented-circuit-additions", {
+  --- config = { mode = "vanilla"|"crafting-time"|"memory-cell"|"recipe-products"
+  ---   |"recipe-finder", machine = string?, condition = table?,
+  ---   researched_only = boolean?, no_fluid = boolean? }
+  configure_selector = function(entity, config)
+    if not (entity and entity.valid and entity.type == "selector-combinator") then
+      error("configure_selector: expected a valid selector-combinator entity")
+    end
+    config = config or {}
+    local mode = config.mode or "vanilla"
+    if mode == "vanilla" then
+      selector_mode.set_vanilla(entity)
+      return
+    end
+    local state
+    if mode == selector_mode.MODE_CRAFTING_TIME then
+      state = selector_mode.set_crafting_time(entity)
+    elseif mode == selector_mode.MODE_MEMORY_CELL then
+      state = selector_mode.set_memory_cell(entity)
+      if config.condition then
+        state.condition = config.condition
+      end
+    elseif mode == selector_mode.MODE_RECIPE_PRODUCTS then
+      state = selector_mode.set_recipe_products(entity)
+    elseif mode == selector_mode.MODE_RECIPE_FINDER then
+      state = selector_mode.set_recipe_finder(entity)
+      if config.researched_only ~= nil then
+        state.researched_only = config.researched_only
+      end
+      if config.no_fluid ~= nil then
+        state.no_fluid = config.no_fluid
+      end
+    else
+      error("configure_selector: unknown mode " .. tostring(mode))
+    end
+    if config.machine then
+      state.machine = config.machine
+    end
+    -- Force a rewrite on the next tick.
+    state.last_output = nil
+  end,
+})
