@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.1
+Date: 2026-06-12
+  Optimizations:
+    - gate selector Mode drivers on a sentinel combinator
+  Control:
+    - scripting API and headless benchmark harness
+---------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2026-06-12
   Features:
