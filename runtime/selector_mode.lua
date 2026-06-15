@@ -28,6 +28,7 @@ local ticks = require("domain.ticks")
 local memory_cell = require("domain.memory_cell")
 local recipe_products = require("domain.recipe_products")
 local recipe_finder = require("domain.recipe_finder")
+local stack_pack = require("domain.stack_pack")
 local preset = require("runtime.preset")
 
 local selector_mode = {}
@@ -36,6 +37,7 @@ selector_mode.MODE_CRAFTING_TIME = "crafting-time"
 selector_mode.MODE_MEMORY_CELL = "memory-cell"
 selector_mode.MODE_RECIPE_PRODUCTS = "recipe-products"
 selector_mode.MODE_RECIPE_FINDER = "recipe-finder"
+selector_mode.MODE_STACK_PACK = "stack-pack"
 
 local OUTPUT_ENTITY = "lca-hidden-output"
 local SENTINEL_ENTITY = "lca-hidden-sentinel"
@@ -110,6 +112,19 @@ local function products()
     end
   end
   return products_cache
+end
+
+-- Item stack sizes, rebuilt once per load from prototypes (deterministic,
+-- multiplayer-safe). Feeds the Stack Pack Mode's slot arithmetic.
+local stack_size_cache
+local function stack_sizes()
+  if not stack_size_cache then
+    stack_size_cache = {}
+    for name, proto in pairs(prototypes.item) do
+      stack_size_cache[name] = proto.stack_size
+    end
+  end
+  return stack_size_cache
 end
 
 -- Producer index for the Recipe Finder, rebuilt once per load from
@@ -523,6 +538,46 @@ function selector_mode.set_recipe_finder(entity)
   return state
 end
 
+function selector_mode.set_stack_pack(entity)
+  local state = enter_script_mode(entity, selector_mode.MODE_STACK_PACK)
+  if state.slots == nil then
+    state.slots = 48
+  end
+  if state.select_max == nil then
+    state.select_max = true
+  end
+  ensure_lua_helpers(entity, state)
+  return state
+end
+
+--- Stack Pack: set the slot budget X from the GUI constant field.
+function selector_mode.set_pack_slots(entity, slots)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state.slots = slots
+    selector_mode.dirty(entity.unit_number)
+  end
+end
+
+--- Stack Pack: read the slot budget X from a chosen input signal (nil = use
+--- the constant). The chosen signal is excluded from packing at compute time.
+function selector_mode.set_pack_slots_signal(entity, signal)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state.slots_signal = signal
+    selector_mode.dirty(entity.unit_number)
+  end
+end
+
+--- Stack Pack: order items by count descending (max) or ascending.
+function selector_mode.set_pack_sort(entity, select_max)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state.select_max = select_max
+    selector_mode.dirty(entity.unit_number)
+  end
+end
+
 function selector_mode.set_memory_cell(entity)
   local state, changed = enter_script_mode(entity, selector_mode.MODE_MEMORY_CELL)
   if changed then
@@ -794,6 +849,38 @@ local function compute_recipe_finder(state, signals)
   )
 end
 
+-- Scalar value of one signal id in an engine signal array, 0 when absent.
+-- Only runs on change ticks (when Stack Pack reads X from a signal).
+local function signal_value(signals, id)
+  local want_type = id.type or "item"
+  local want_quality = id.quality or "normal"
+  for i = 1, #signals do
+    local sid = signals[i].signal
+    if
+      sid.name == id.name
+      and (sid.type or "item") == want_type
+      and (sid.quality or "normal") == want_quality
+    then
+      return signals[i].count
+    end
+  end
+  return 0
+end
+
+local function compute_stack_pack(state, signals)
+  local x = state.slots or 0
+  if state.slots_signal then
+    x = signal_value(signals, state.slots_signal)
+  end
+  return stack_pack.map(
+    to_frame(signals),
+    stack_sizes(),
+    x,
+    state.select_max ~= false,
+    state.slots_signal
+  )
+end
+
 -- One tick of the Memory Cell; level-triggered, so the step itself decides
 -- whether the Stored Frame is replaced or kept. An unchanged input frame
 -- always yields an unchanged Stored Frame, so the change gating upstream
@@ -807,6 +894,7 @@ local COMPUTE = {
   [selector_mode.MODE_MEMORY_CELL] = compute_memory_cell,
   [selector_mode.MODE_RECIPE_PRODUCTS] = compute_recipe_products,
   [selector_mode.MODE_RECIPE_FINDER] = compute_recipe_finder,
+  [selector_mode.MODE_STACK_PACK] = compute_stack_pack,
 }
 
 -- Full re-evaluation: read the merged frame, recompute when it differs

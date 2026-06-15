@@ -30,6 +30,7 @@ local CT_DROPDOWN_INDEX = #OPERATIONS + 1
 local MC_DROPDOWN_INDEX = #OPERATIONS + 2
 local RP_DROPDOWN_INDEX = #OPERATIONS + 3
 local RF_DROPDOWN_INDEX = #OPERATIONS + 4
+local SP_DROPDOWN_INDEX = #OPERATIONS + 5
 
 -- Vanilla circuit-condition comparator order; the engine reports the
 -- canonical single-character forms.
@@ -315,6 +316,44 @@ local function build_recipe_finder_panel(panel, state)
   }
 end
 
+-- Stack Pack: ordering toggle plus the slot budget X (constant or signal),
+-- reusing vanilla Select input's control shape. State lives on the script
+-- Mode, so the handlers route through selector_mode, not entity parameters.
+local function build_stack_pack_panel(panel, state)
+  panel.add{
+    type = "radiobutton",
+    state = state.select_max ~= false,
+    caption = { "gui-selector.select-max" },
+    tooltip = { "gui-selector.select-sort-description" },
+    tags = { lca = "sc", action = "sp_sort", max = true },
+  }
+  panel.add{
+    type = "radiobutton",
+    state = state.select_max == false,
+    caption = { "gui-selector.select-min" },
+    tooltip = { "gui-selector.select-sort-description" },
+    tags = { lca = "sc", action = "sp_sort", max = false },
+  }
+  local row = labeled_row(panel)
+  row.add{ type = "label", caption = { "lca-gui.slots" }, style = "semibold_label" }
+  row.add{
+    type = "choose-elem-button",
+    elem_type = "signal",
+    signal = common.signal_to_elem(state.slots_signal),
+    tags = { lca = "sc", action = "sp_slots_signal" },
+  }
+  local constant = row.add{
+    type = "textfield",
+    text = tostring(state.slots or 0),
+    numeric = true,
+    allow_decimal = false,
+    allow_negative = false,
+    enabled = state.slots_signal == nil,
+    tags = { lca = "sc", action = "sp_slots" },
+  }
+  constant.style.width = 60
+end
+
 local WILDCARDS = { "signal-everything", "signal-anything", "signal-each" }
 
 -- Update Condition row: signal | comparator | signal-or-constant, plus a
@@ -447,6 +486,7 @@ function sc_gui.open(player, entity)
   local in_mc = script_mode == selector_mode.MODE_MEMORY_CELL
   local in_rp = script_mode == selector_mode.MODE_RECIPE_PRODUCTS
   local in_rf = script_mode == selector_mode.MODE_RECIPE_FINDER
+  local in_sp = script_mode == selector_mode.MODE_STACK_PACK
 
   local items = {}
   for i, name in ipairs(OPERATIONS) do
@@ -456,6 +496,7 @@ function sc_gui.open(player, entity)
   items[MC_DROPDOWN_INDEX] = { "lca-gui.mode-memory-cell" }
   items[RP_DROPDOWN_INDEX] = { "lca-gui.mode-recipe-products" }
   items[RF_DROPDOWN_INDEX] = { "lca-gui.mode-recipe-finder" }
+  items[SP_DROPDOWN_INDEX] = { "lca-gui.mode-stack-pack" }
   local selected_index = OP_INDEX[op] or 1
   if in_ct then
     selected_index = CT_DROPDOWN_INDEX
@@ -465,6 +506,8 @@ function sc_gui.open(player, entity)
     selected_index = RP_DROPDOWN_INDEX
   elseif in_rf then
     selected_index = RF_DROPDOWN_INDEX
+  elseif in_sp then
+    selected_index = SP_DROPDOWN_INDEX
   end
   local dropdown = inner.add{
     type = "drop-down",
@@ -483,6 +526,8 @@ function sc_gui.open(player, entity)
     description_caption = { "lca-gui.mode-recipe-products-description" }
   elseif in_rf then
     description_caption = { "lca-gui.mode-recipe-finder-description" }
+  elseif in_sp then
+    description_caption = { "lca-gui.mode-stack-pack-description" }
   end
   local description = inner.add{ type = "label", caption = description_caption }
   description.style.single_line = false
@@ -496,6 +541,8 @@ function sc_gui.open(player, entity)
     build_recipe_finder_panel(panel, mode_state)
   elseif in_mc then
     build_memory_cell_panel(panel, mode_state)
+  elseif in_sp then
+    build_stack_pack_panel(panel, mode_state)
   elseif not in_rp then
     -- Recipe Products has no settings.
     local builder = PANEL_BUILDERS[op]
@@ -620,6 +667,8 @@ function sc_gui.on_selection(event)
       selector_mode.set_recipe_products(entity)
     elseif index == RF_DROPDOWN_INDEX then
       selector_mode.set_recipe_finder(entity)
+    elseif index == SP_DROPDOWN_INDEX then
+      selector_mode.set_stack_pack(entity)
     else
       selector_mode.set_vanilla(entity)
       update_parameters(player, entity, function(p)
@@ -675,6 +724,9 @@ function sc_gui.on_checked(event)
       p.select_quality_from_signal = tags.from_signal
     end)
     reopen(player, entity)
+  elseif tags.action == "sp_sort" then
+    selector_mode.set_pack_sort(entity, tags.max)
+    reopen(player, entity)
   end
 end
 
@@ -718,6 +770,10 @@ function sc_gui.on_elem_changed(event)
     update_parameters(player, entity, function(p)
       p.quality_destination_signal = sig
     end)
+  elseif action == "sp_slots_signal" then
+    selector_mode.set_pack_slots_signal(entity, elem_to_signal(sig))
+    -- Toggle the constant field's enabled state.
+    reopen(player, entity)
   end
 end
 
@@ -743,6 +799,8 @@ function sc_gui.on_text_changed(event)
     update_parameters(player, entity, function(p)
       p.random_update_interval = math.max(0, math.min(INT32_MAX, n))
     end)
+  elseif tags.action == "sp_slots" then
+    selector_mode.set_pack_slots(entity, math.max(0, math.min(INT32_MAX, n)))
   end
 end
 

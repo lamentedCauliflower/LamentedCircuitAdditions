@@ -67,6 +67,15 @@ local function tag_for(entity)
         stash = copy(state.stash),
       }
     end
+    if state and state.mode == selector_mode.MODE_STACK_PACK then
+      return {
+        mode = state.mode,
+        slots = state.slots,
+        slots_signal = copy(state.slots_signal),
+        select_max = state.select_max,
+        stash = copy(state.stash),
+      }
+    end
   end
   return nil
 end
@@ -115,6 +124,19 @@ local function apply_tag(entity, tag)
       state.machine = tag.machine
       state.researched_only = tag.researched_only ~= false
       state.no_fluid = tag.no_fluid == true
+      selector_mode.dirty(entity.unit_number)
+      if tag.stash then
+        state.stash = copy(tag.stash)
+      end
+    elseif tag.mode == selector_mode.MODE_STACK_PACK then
+      local state = selector_mode.set_stack_pack(entity)
+      if tag.slots ~= nil then
+        state.slots = tag.slots
+      end
+      state.slots_signal = copy(tag.slots_signal)
+      if tag.select_max ~= nil then
+        state.select_max = tag.select_max
+      end
       selector_mode.dirty(entity.unit_number)
       if tag.stash then
         state.stash = copy(tag.stash)

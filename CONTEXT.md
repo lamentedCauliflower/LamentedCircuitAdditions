@@ -64,6 +64,20 @@ named exactly like it; else the recipe whose main product it is; else the
 alphabetically first producer.
 _Avoid_: best recipe, default recipe
 
+**Stack Pack Mode**:
+A selector combinator Mode that packs the input item signals into the first X slots
+and outputs the amount that fits. Each item (count C, stack size S) lays its slots
+partial-stack-first: [C mod S, S, S, …], needing ceil(C/S) slots. Items are ordered
+by count (highest first by default; a highest/lowest toggle and the slot budget X
+mirror vanilla Select input's controls, X taken from a constant or an input signal),
+ties broken by name then quality. Their slots are concatenated in that order and the
+first X kept; each item outputs the summed amount of its kept slots (boundary item:
+C − (ceil(C/S) − k)·S for k kept slots). Only items pack — non-item inputs,
+counts ≤ 0, and the signal chosen as the X source are dropped from the pack set
+(an empty or ≤ 0 budget yields no output). Takes no Target Machine; stack sizes are machine-independent.
+Output items inherit the input signal's quality.
+_Avoid_: select, slot fill, stack size (reserved for the vanilla selector operation)
+
 **Memory Cell**:
 A selector combinator Mode that holds a Stored Frame and outputs it continuously.
 Level-triggered: every tick the Update Condition holds, the Stored Frame is replaced

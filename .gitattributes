@@ -7,6 +7,7 @@
 
 # files that should not get included in a release zip
 README.md export-ignore
+Modpage.md export-ignore
 .vscode export-ignore
 .git export-ignore
 .github export-ignore
@@ -22,3 +23,9 @@ CONTEXT.md export-ignore
 
 # benchmark tooling: the mod portal rejects script files in packages
 bench export-ignore
+
+# devenv / direnv dev shell: never ship in a release zip
+devenv.nix export-ignore
+devenv.yaml export-ignore
+devenv.lock export-ignore
+.envrc export-ignore
