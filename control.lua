@@ -14,17 +14,9 @@ script.on_init(function()
 end)
 
 script.on_configuration_changed(function()
-  -- Saves from before the per-tick driver's change gating: deactivate the
-  -- parked selectors (the hidden output carries the signals) and drop the
-  -- old signature strings so every combinator rewrites once.
-  for _, state in pairs(storage.sc_modes or {}) do
-    local entity = state.entity
-    if entity and entity.valid then
-      entity.active = false
-    end
-    state.last_output = nil
-    state.last_input = nil
-  end
+  -- Rebuild every script Mode's hidden helpers (groups, sentinels, engine
+  -- chains) so saves from older helper layouts migrate forward.
+  selector_mode.migrate()
 end)
 
 script.on_event(defines.events.on_gui_opened, function(event)
@@ -81,6 +73,10 @@ script.on_event(defines.events.on_entity_cloned, persist.on_cloned, {
   { filter = "type", type = "selector-combinator" },
   { filter = "name", name = "lca-hidden-output" },
   { filter = "name", name = "lca-hidden-sentinel" },
+  { filter = "name", name = "lca-hidden-anchor" },
+  { filter = "name", name = "lca-hidden-merge" },
+  { filter = "name", name = "lca-hidden-map" },
+  { filter = "name", name = "lca-hidden-gate" },
 })
 script.on_event(defines.events.on_player_mined_entity, persist.on_player_mined, combinator_filter)
 script.on_event(defines.events.on_marked_for_deconstruction, persist.on_marked_for_deconstruction, combinator_filter)
@@ -127,7 +123,7 @@ remote.add_interface("lamented-circuit-additions", {
     if config.machine then
       state.machine = config.machine
     end
-    -- Force a rewrite on the next tick.
-    state.last_output = nil
+    -- Recompute (Lua Modes next tick; Crafting-Time rewrites its engine map).
+    selector_mode.dirty(entity.unit_number)
   end,
 })

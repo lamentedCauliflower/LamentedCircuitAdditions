@@ -1,21 +1,30 @@
 -- Script-driven Modes for the selector combinator. The engine cannot run
 -- custom selector operations, so while a script Mode is active the vanilla
--- selector is parked inert and deactivated (entity.active = false) and a
--- hidden constant combinator, wired to the selector's output connectors,
--- carries the script-computed signals. All state lives in storage keyed by
--- unit number.
+-- selector is parked inert and deactivated (entity.active = false) and hidden
+-- helper entities, wired to the selector's connectors, carry the work. All
+-- state lives in storage keyed by unit number.
 --
--- Per-tick budget: bulk signal reads (get_signals) cost ~20µs per call, a
--- scalar read costs ~0.4µs. So a hidden sentinel arithmetic combinator
--- watches each script combinator's input networks and folds them into one
--- signal (each XOR K -> S); the engine keeps it current event-driven. The
--- per-tick driver reads that one scalar, and only on a sentinel change (or
--- a staggered full sweep every SWEEP_INTERVAL ticks, the safety net for
--- XOR-sum collisions) does it read the full frame, recompute, and rewrite
--- the hidden output. Configuration setters mark the state dirty with
--- state.last_output = nil to force a recompute on the next tick.
+-- Two strategies, by Mode:
+--
+-- * Crafting-Time is fully engine-driven (zero per-tick Lua). A hidden chain
+--   merge (arith) -> map (constant) -> gate (decider) reproduces the mapping:
+--   merge collapses the host's red+green inputs onto one wire; map holds every
+--   recipe's crafting-tick count for the Target Machine; gate emits each recipe
+--   present on the merged input with the count copied from map. Rewritten only
+--   on Target-Machine / config change.
+--
+-- * Memory Cell, Recipe Products and Recipe Finder still run a per-tick Lua
+--   driver, but cheaply. Bulk signal reads (get_signals) cost ~20us; a scalar
+--   read ~0.4us. So a hidden sentinel arithmetic combinator folds each host's
+--   inputs into one signal (each XOR K -> S), kept current event-driven. The
+--   sentinels of up to GROUP_MAX same-surface hosts feed one hidden anchor
+--   (S + 0 -> S) that sums them. Per tick the driver reads each group's anchor
+--   scalar; an unchanged sum (and no sweep / forced flag) skips the whole
+--   group without touching its members. On a change it reads each member's own
+--   sentinel to find which moved and drives only those. A staggered per-group
+--   sweep every SWEEP_INTERVAL ticks is the safety net for XOR-sum collisions.
 
-local crafting_time = require("domain.crafting_time")
+local ticks = require("domain.ticks")
 local memory_cell = require("domain.memory_cell")
 local recipe_products = require("domain.recipe_products")
 local recipe_finder = require("domain.recipe_finder")
@@ -30,18 +39,33 @@ selector_mode.MODE_RECIPE_FINDER = "recipe-finder"
 
 local OUTPUT_ENTITY = "lca-hidden-output"
 local SENTINEL_ENTITY = "lca-hidden-sentinel"
+local ANCHOR_ENTITY = "lca-hidden-anchor"
+local MERGE_ENTITY = "lca-hidden-merge"
+local MAP_ENTITY = "lca-hidden-map"
+local GATE_ENTITY = "lca-hidden-gate"
 local SENTINEL_SIGNAL = { type = "virtual", name = "signal-S" }
+local EACH = { type = "virtual", name = "signal-each" }
 local SENTINEL_MIX = 1515870810 -- 0x5A5A5A5A, mixes values so natural sum-preserving moves still register
-local SWEEP_INTERVAL = 30
+local SWEEP_INTERVAL = 60
+local GROUP_MAX = 32
 local INT32_MIN, INT32_MAX = -2147483648, 2147483647
+local MAX_SECTION_FILTERS = 1000
 local INERT_PARAMETERS = { operation = "count" }
 local IN_RED = defines.wire_connector_id.combinator_input_red
 local IN_GREEN = defines.wire_connector_id.combinator_input_green
+local OUT_RED = defines.wire_connector_id.combinator_output_red
+local OUT_GREEN = defines.wire_connector_id.combinator_output_green
+local CIRCUIT_GREEN = defines.wire_connector_id.circuit_green
 local EMPTY = {} -- shared "no input networks" frame
 
 local function mode_states()
   storage.sc_modes = storage.sc_modes or {}
   return storage.sc_modes
+end
+
+local function groups()
+  storage.sc_groups = storage.sc_groups or {}
+  return storage.sc_groups
 end
 
 --- The combinator's script-Mode state, or nil when engine-driven.
@@ -124,6 +148,20 @@ local function producer_index()
   return finder_index
 end
 
+-- Visible quality names, deterministically sorted, for building the
+-- crafting-time map across qualities (a recipe signal keeps its quality).
+local quality_cache
+local function quality_names()
+  if not quality_cache then
+    quality_cache = {}
+    for name in pairs(prototypes.quality) do
+      quality_cache[#quality_cache + 1] = name
+    end
+    table.sort(quality_cache)
+  end
+  return quality_cache
+end
+
 local function machine_categories(machine_name)
   local proto = machine_name and prototypes.entity[machine_name]
   return proto and proto.crafting_categories or nil
@@ -147,21 +185,6 @@ local function researched_set(force)
   return set
 end
 
---- Drop the force's cached researched set and mark the force's Recipe
---- Finders dirty so they recompute even with an unchanged input frame.
-function selector_mode.on_research_changed(event)
-  local force = event.research.force
-  researched_cache[force.index] = nil
-  for _, state in pairs(mode_states()) do
-    if state.mode == selector_mode.MODE_RECIPE_FINDER then
-      local entity = state.entity
-      if entity and entity.valid and entity.force.index == force.index then
-        state.last_output = nil
-      end
-    end
-  end
-end
-
 local function machine_speed(machine_name)
   local proto = machine_name and prototypes.entity[machine_name]
   if not proto then
@@ -176,51 +199,52 @@ local function machine_speed(machine_name)
   return nil
 end
 
+-- Bound sentinel/anchor reader functions (control_behavior.get_signal_last_tick),
+-- module-local caches rebuilt lazily per load. Caching the bound method skips
+-- the LuaObject __index lookup on every steady tick; deterministic, so
+-- multiplayer-safe. sentinel_reads keyed by unit number, anchor_reads by group id.
+local sentinel_reads = {}
+local anchor_reads = {}
+
+local function spawn(entity, name)
+  local helper = entity.surface.create_entity{
+    name = name,
+    position = entity.position,
+    force = entity.force,
+  }
+  helper.destructible = false
+  return helper
+end
+
+-- Script-origin wire between two entities' connectors.
+local function connect(a, a_conn, b, b_conn)
+  local ca = a.get_wire_connector(a_conn, true)
+  local cb = b.get_wire_connector(b_conn, true)
+  ca.connect_to(cb, false, defines.wire_origin.script)
+end
+
 local function ensure_output(entity, state)
   if state.output and state.output.valid then
     return state.output
   end
-  local output = entity.surface.create_entity{
-    name = OUTPUT_ENTITY,
-    position = entity.position,
-    force = entity.force,
-  }
-  output.destructible = false
+  local output = spawn(entity, OUTPUT_ENTITY)
   local connector = defines.wire_connector_id
-  for _, pair in ipairs({
-    { connector.combinator_output_red, connector.circuit_red },
-    { connector.combinator_output_green, connector.circuit_green },
-  }) do
-    local selector_side = entity.get_wire_connector(pair[1], true)
-    local output_side = output.get_wire_connector(pair[2], true)
-    output_side.connect_to(selector_side, false, defines.wire_origin.script)
-  end
+  connect(output, connector.circuit_red, entity, connector.combinator_output_red)
+  connect(output, connector.circuit_green, entity, connector.combinator_output_green)
   state.output = output
   return output
 end
-
--- Sentinel control behaviors, a module-local cache rebuilt lazily per load
--- (LuaObject lookups are deterministic, so this is multiplayer-safe).
-local sentinel_cbs = {}
 
 local function ensure_sentinel(entity, state)
   if state.sentinel and state.sentinel.valid then
     return state.sentinel
   end
-  sentinel_cbs[entity.unit_number] = nil
-  local sentinel = entity.surface.create_entity{
-    name = SENTINEL_ENTITY,
-    position = entity.position,
-    force = entity.force,
-  }
-  sentinel.destructible = false
-  for _, id in ipairs({ IN_RED, IN_GREEN }) do
-    local selector_side = entity.get_wire_connector(id, true)
-    local sentinel_side = sentinel.get_wire_connector(id, true)
-    sentinel_side.connect_to(selector_side, false, defines.wire_origin.script)
-  end
+  sentinel_reads[entity.unit_number] = nil
+  local sentinel = spawn(entity, SENTINEL_ENTITY)
+  connect(sentinel, IN_RED, entity, IN_RED)
+  connect(sentinel, IN_GREEN, entity, IN_GREEN)
   sentinel.get_or_create_control_behavior().parameters = {
-    first_signal = { type = "virtual", name = "signal-each" },
+    first_signal = EACH,
     operation = "XOR",
     second_constant = SENTINEL_MIX,
     output_signal = SENTINEL_SIGNAL,
@@ -230,21 +254,210 @@ local function ensure_sentinel(entity, state)
   return sentinel
 end
 
-local function destroy_helpers(state)
-  if state.output and state.output.valid then
-    state.output.destroy()
+-- ---- Crafting-Time engine chain ------------------------------------------
+
+-- Write the map constant combinator: every recipe -> its crafting-tick count
+-- for the Target Machine, across all qualities. Rewritten on machine/config
+-- change only. An invalid machine leaves the map empty (gate emits nothing).
+local function write_ct_map(state)
+  local map = state.map
+  if not (map and map.valid) then
+    return
   end
-  state.output = nil
-  if state.sentinel and state.sentinel.valid then
-    state.sentinel.destroy()
+  local cb = map.get_or_create_control_behavior()
+  while cb.sections_count > 0 do
+    cb.remove_section(cb.sections_count)
   end
-  state.sentinel = nil
+  local speed = machine_speed(state.machine)
+  if not (speed and speed > 0) then
+    return
+  end
+  local quals = quality_names()
+  local names = {}
+  for name in pairs(energies()) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  local en = energies()
+  -- One flat filter list, then chunked into sections (filter order is
+  -- irrelevant: the network sums per signal).
+  local filters = {}
+  for _, name in ipairs(names) do
+    local count = ticks.crafting_ticks(en[name], speed)
+    if count > INT32_MAX then
+      count = INT32_MAX
+    elseif count < INT32_MIN then
+      count = INT32_MIN
+    end
+    for _, q in ipairs(quals) do
+      filters[#filters + 1] = {
+        value = { type = "recipe", name = name, quality = q, comparator = "=" },
+        min = count,
+      }
+    end
+  end
+  for start = 1, #filters, MAX_SECTION_FILTERS do
+    local chunk = {}
+    for i = start, math.min(start + MAX_SECTION_FILTERS - 1, #filters) do
+      chunk[#chunk + 1] = filters[i]
+    end
+    local section = cb.add_section()
+    local ok, err = pcall(function()
+      section.filters = chunk
+    end)
+    if not ok then
+      log(err)
+    end
+  end
+end
+
+local function ensure_ct_helpers(entity, state)
+  if not (state.merge and state.merge.valid) then
+    local merge = spawn(entity, MERGE_ENTITY)
+    connect(merge, IN_RED, entity, IN_RED)
+    connect(merge, IN_GREEN, entity, IN_GREEN)
+    merge.get_or_create_control_behavior().parameters = {
+      first_signal = EACH,
+      operation = "+",
+      second_constant = 0,
+      output_signal = EACH,
+    }
+    state.merge = merge
+  end
+  if not (state.map and state.map.valid) then
+    state.map = spawn(entity, MAP_ENTITY)
+  end
+  if not (state.gate and state.gate.valid) then
+    local gate = spawn(entity, GATE_ENTITY)
+    -- Condition reads the merged user frame (red); output copies counts from
+    -- the map (green). A recipe present on red but absent from map yields
+    -- count 0 and is dropped, so non-recipe inputs fall away naturally.
+    connect(gate, IN_RED, state.merge, OUT_RED)
+    connect(gate, IN_GREEN, state.map, CIRCUIT_GREEN)
+    connect(gate, OUT_RED, entity, OUT_RED)
+    connect(gate, OUT_GREEN, entity, OUT_GREEN)
+    gate.get_or_create_control_behavior().parameters = {
+      conditions = {
+        {
+          first_signal = EACH,
+          comparator = "≠",
+          constant = 0,
+          first_signal_networks = { red = true, green = false },
+        },
+      },
+      outputs = {
+        {
+          signal = EACH,
+          copy_count_from_input = true,
+          networks = { red = false, green = true },
+        },
+      },
+    }
+    state.gate = gate
+  end
+end
+
+-- ---- Group lifecycle (Lua-driven Modes) ----------------------------------
+
+local function new_group(entity)
+  local all = groups()
+  storage.sc_group_seq = (storage.sc_group_seq or 0) + 1
+  local gid = storage.sc_group_seq
+  local anchor = spawn(entity, ANCHOR_ENTITY)
+  anchor.get_or_create_control_behavior().parameters = {
+    first_signal = SENTINEL_SIGNAL,
+    operation = "+",
+    second_constant = 0,
+    output_signal = SENTINEL_SIGNAL,
+  }
+  local group = {
+    anchor = anchor,
+    surface = entity.surface.index,
+    members = {},
+    count = 0,
+    last_sum = nil,
+    forced = true,
+  }
+  all[gid] = group
+  anchor_reads[gid] = nil
+  return gid, group
+end
+
+-- Add a Lua-driven member to a same-surface group (creating one when none has
+-- room), wiring its sentinel output onto the group's shared anchor network.
+local function ensure_group(state)
+  local entity = state.entity
+  local un = entity.unit_number
+  local all = groups()
+  if state.group_id then
+    local g = all[state.group_id]
+    if g and g.anchor and g.anchor.valid and g.members[un] then
+      g.forced = true
+      return g
+    end
+  end
+  local surface = entity.surface.index
+  local gid, group
+  for id, g in pairs(all) do
+    if g.surface == surface and g.count < GROUP_MAX and g.anchor and g.anchor.valid then
+      gid, group = id, g
+      break
+    end
+  end
+  if not group then
+    gid, group = new_group(entity)
+  end
+  group.members[un] = true
+  group.count = group.count + 1
+  group.forced = true
+  state.group_id = gid
+  connect(state.sentinel, OUT_RED, group.anchor, IN_RED)
+  return group
+end
+
+local function leave_group(state, un)
+  local gid = state.group_id
+  state.group_id = nil
+  if not gid then
+    return
+  end
+  local all = storage.sc_groups
+  local g = all and all[gid]
+  if not g then
+    return
+  end
+  if g.members[un] then
+    g.members[un] = nil
+    g.count = g.count - 1
+  end
+  if g.count <= 0 then
+    if g.anchor and g.anchor.valid then
+      g.anchor.destroy()
+    end
+    anchor_reads[gid] = nil
+    all[gid] = nil
+  end
+end
+
+local function destroy_helpers(state, un)
+  un = un or (state.entity and state.entity.unit_number)
+  for _, field in ipairs({ "output", "sentinel", "merge", "map", "gate" }) do
+    local helper = state[field]
+    if helper and helper.valid then
+      helper.destroy()
+    end
+    state[field] = nil
+  end
+  if un then
+    sentinel_reads[un] = nil
+  end
+  leave_group(state, un)
 end
 
 -- Enter a script Mode. Coming from engine-driven: stash the vanilla
--- parameters, park the selector inert and deactivated, attach the hidden
--- output and sentinel. Switching between script Modes keeps the stash and
--- the helpers. Returns the state and whether the Mode actually changed.
+-- parameters, park the selector inert and deactivated. Switching between
+-- script Modes drops the old Mode's helpers (the setter builds the new ones).
+-- Returns the state and whether the Mode actually changed.
 local function enter_script_mode(entity, mode)
   local all = mode_states()
   local state = all[entity.unit_number]
@@ -253,6 +466,7 @@ local function enter_script_mode(entity, mode)
     if state.mode == mode then
       return state, false
     end
+    destroy_helpers(state, entity.unit_number)
     state.mode = mode
     state.last_output = nil
     return state, true
@@ -265,13 +479,17 @@ local function enter_script_mode(entity, mode)
   }
   all[entity.unit_number] = state
   cb.parameters = INERT_PARAMETERS
-  -- The engine never needs to update the parked selector; the hidden
-  -- output carries the signals.
+  -- The engine never needs to update the parked selector; the helpers carry
+  -- the signals.
   entity.active = false
-  ensure_output(entity, state)
-  ensure_sentinel(entity, state)
   script.register_on_object_destroyed(entity)
   return state, true
+end
+
+local function ensure_lua_helpers(entity, state)
+  ensure_output(entity, state)
+  ensure_sentinel(entity, state)
+  ensure_group(state)
 end
 
 function selector_mode.set_crafting_time(entity)
@@ -279,11 +497,15 @@ function selector_mode.set_crafting_time(entity)
   if state.machine == nil then
     state.machine = preset.default_machine()
   end
+  ensure_ct_helpers(entity, state)
+  write_ct_map(state)
   return state
 end
 
 function selector_mode.set_recipe_products(entity)
-  return enter_script_mode(entity, selector_mode.MODE_RECIPE_PRODUCTS)
+  local state = enter_script_mode(entity, selector_mode.MODE_RECIPE_PRODUCTS)
+  ensure_lua_helpers(entity, state)
+  return state
 end
 
 function selector_mode.set_recipe_finder(entity)
@@ -297,16 +519,8 @@ function selector_mode.set_recipe_finder(entity)
   if state.no_fluid == nil then
     state.no_fluid = false
   end
+  ensure_lua_helpers(entity, state)
   return state
-end
-
---- Update a Recipe Finder Filter and force a rewrite on the next tick.
-function selector_mode.set_filter(entity, filter, value)
-  local state = mode_states()[entity.unit_number]
-  if state then
-    state[filter] = value
-    state.last_output = nil
-  end
 end
 
 function selector_mode.set_memory_cell(entity)
@@ -315,7 +529,37 @@ function selector_mode.set_memory_cell(entity)
     state.stored = {}
   end
   state.condition = state.condition or { comparator = "<", constant = 0 }
+  ensure_lua_helpers(entity, state)
   return state
+end
+
+--- Mark a script combinator dirty so it recomputes even with an unchanged
+--- input frame. Crafting-Time rewrites its engine map; Lua Modes flag their
+--- group forced and clear the cached output.
+function selector_mode.dirty(unit_number)
+  local state = mode_states()[unit_number]
+  if not state then
+    return
+  end
+  if state.mode == selector_mode.MODE_CRAFTING_TIME then
+    write_ct_map(state)
+    return
+  end
+  state.last_output = nil
+  state.dirty = true
+  local g = state.group_id and storage.sc_groups and storage.sc_groups[state.group_id]
+  if g then
+    g.forced = true
+  end
+end
+
+--- Update a Recipe Finder Filter and force a recompute.
+function selector_mode.set_filter(entity, filter, value)
+  local state = mode_states()[entity.unit_number]
+  if state then
+    state[filter] = value
+    selector_mode.dirty(entity.unit_number)
+  end
 end
 
 --- Back to engine-driven: drop the script helpers, reactivate the selector
@@ -327,7 +571,7 @@ function selector_mode.set_vanilla(entity)
   if not state then
     return
   end
-  destroy_helpers(state)
+  destroy_helpers(state, entity.unit_number)
   entity.active = true
   local cb = entity.get_or_create_control_behavior()
   local ok = pcall(function()
@@ -344,8 +588,7 @@ function selector_mode.clear_memory(entity)
   local state = mode_states()[entity.unit_number]
   if state and state.mode == selector_mode.MODE_MEMORY_CELL then
     state.stored = {}
-    -- Force a rewrite on the next tick.
-    state.last_output = nil
+    selector_mode.dirty(entity.unit_number)
   end
 end
 
@@ -353,21 +596,78 @@ function selector_mode.set_machine(entity, machine_name)
   local state = mode_states()[entity.unit_number]
   if state then
     state.machine = machine_name
-    -- Force a rewrite on the next tick.
-    state.last_output = nil
+    selector_mode.dirty(entity.unit_number)
   end
 end
 
 function selector_mode.forget(unit_number)
   local state = mode_states()[unit_number]
   if state then
-    destroy_helpers(state)
-    sentinel_cbs[unit_number] = nil
+    destroy_helpers(state, unit_number)
     local entity = state.entity
     if entity and entity.valid then
       entity.active = true
     end
     mode_states()[unit_number] = nil
+  end
+end
+
+--- Drop the force's cached researched set and mark the force's Recipe
+--- Finders dirty so they recompute even with an unchanged input frame.
+function selector_mode.on_research_changed(event)
+  local force = event.research.force
+  researched_cache[force.index] = nil
+  for un, state in pairs(mode_states()) do
+    if state.mode == selector_mode.MODE_RECIPE_FINDER then
+      local entity = state.entity
+      if entity and entity.valid and entity.force.index == force.index then
+        selector_mode.dirty(un)
+      end
+    end
+  end
+end
+
+-- Rebuild every script Mode's helpers from scratch (groups, sentinels, engine
+-- chains). Run on configuration changes: migrates pre-engine / pre-group
+-- saves and recovers from any helper drift.
+function selector_mode.migrate()
+  if storage.sc_groups then
+    for _, g in pairs(storage.sc_groups) do
+      if g.anchor and g.anchor.valid then
+        g.anchor.destroy()
+      end
+    end
+  end
+  storage.sc_groups = {}
+  storage.sc_group_seq = 0
+  anchor_reads = {}
+  sentinel_reads = {}
+  for un, state in pairs(mode_states()) do
+    local entity = state.entity
+    if entity and entity.valid then
+      entity.active = false
+      state.group_id = nil
+      state.last_output = nil
+      state.last_input = nil
+      state.sentinel_value = nil
+      state.dirty = nil
+      -- Drop whatever helpers the old save had; rebuild for this Mode.
+      for _, field in ipairs({ "output", "sentinel", "merge", "map", "gate" }) do
+        local helper = state[field]
+        if helper and helper.valid then
+          helper.destroy()
+        end
+        state[field] = nil
+      end
+      if state.mode == selector_mode.MODE_CRAFTING_TIME then
+        ensure_ct_helpers(entity, state)
+        write_ct_map(state)
+      else
+        ensure_lua_helpers(entity, state)
+      end
+    else
+      mode_states()[un] = nil
+    end
   end
 end
 
@@ -473,14 +773,6 @@ local function write_output(entity, state, out)
   end
 end
 
-local function compute_crafting_time(state, signals)
-  local speed = machine_speed(state.machine)
-  if not (speed and speed > 0) then
-    return {}
-  end
-  return crafting_time.map(to_frame(signals), energies(), speed)
-end
-
 local function compute_recipe_products(state, signals)
   return recipe_products.map(to_frame(signals), products())
 end
@@ -512,7 +804,6 @@ local function compute_memory_cell(state, signals)
 end
 
 local COMPUTE = {
-  [selector_mode.MODE_CRAFTING_TIME] = compute_crafting_time,
   [selector_mode.MODE_MEMORY_CELL] = compute_memory_cell,
   [selector_mode.MODE_RECIPE_PRODUCTS] = compute_recipe_products,
   [selector_mode.MODE_RECIPE_FINDER] = compute_recipe_finder,
@@ -537,43 +828,62 @@ local function drive(entity, state, compute)
 end
 
 function selector_mode.on_tick()
-  local states = storage.sc_modes
-  if not states or next(states) == nil then
+  local all = storage.sc_groups
+  if not all or next(all) == nil then
     return
   end
+  local states = storage.sc_modes
   local tick = game.tick
-  for unit_number, state in pairs(states) do
-    local compute = COMPUTE[state.mode]
-    if compute then
-      local entity = state.entity
-      if entity and entity.valid then
-        local sentinel = state.sentinel
-        if sentinel and sentinel.valid then
-          local cb = sentinel_cbs[unit_number]
-          if not cb then
-            cb = sentinel.get_or_create_control_behavior()
-            sentinel_cbs[unit_number] = cb
-          end
-          local value = cb.get_signal_last_tick(SENTINEL_SIGNAL) or 0
-          if
-            value == state.sentinel_value
-            and state.last_output
-            and (tick + unit_number) % SWEEP_INTERVAL ~= 0
-          then
-            -- Steady state: input unchanged per the sentinel, no sweep
-            -- due, nothing forced a rewrite.
-            goto continue
-          end
-          state.sentinel_value = value
+  for gid, group in pairs(all) do
+    local anchor = group.anchor
+    local anchor_valid = anchor and anchor.valid
+    local sweep_due = (tick + gid) % SWEEP_INTERVAL == 0
+    local sum
+    if anchor_valid then
+      local read = anchor_reads[gid]
+      if not read then
+        read = anchor.get_or_create_control_behavior().get_signal_last_tick
+        anchor_reads[gid] = read
+      end
+      sum = read(SENTINEL_SIGNAL) or 0
+    end
+    if group.forced or sweep_due or not anchor_valid or sum ~= group.last_sum then
+      group.last_sum = sum
+      group.forced = false
+      for un in pairs(group.members) do
+        local state = states[un]
+        if not state then
+          group.members[un] = nil
+          group.count = group.count - 1
         else
-          ensure_sentinel(entity, state)
+          local entity = state.entity
+          if not (entity and entity.valid) then
+            selector_mode.forget(un)
+          else
+            local sentinel = state.sentinel
+            if not (sentinel and sentinel.valid) then
+              ensure_sentinel(entity, state)
+              if anchor_valid then
+                connect(state.sentinel, OUT_RED, anchor, IN_RED)
+              end
+              drive(entity, state, COMPUTE[state.mode])
+            else
+              local mread = sentinel_reads[un]
+              if not mread then
+                mread = sentinel.get_or_create_control_behavior().get_signal_last_tick
+                sentinel_reads[un] = mread
+              end
+              local value = mread(SENTINEL_SIGNAL) or 0
+              if state.dirty or sweep_due or value ~= state.sentinel_value then
+                state.sentinel_value = value
+                state.dirty = nil
+                drive(entity, state, COMPUTE[state.mode])
+              end
+            end
+          end
         end
-        drive(entity, state, compute)
-      else
-        selector_mode.forget(unit_number)
       end
     end
-    ::continue::
   end
 end
 

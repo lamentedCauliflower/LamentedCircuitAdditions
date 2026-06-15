@@ -9,8 +9,16 @@ local selector_mode = require("runtime.selector_mode")
 
 local persist = {}
 
-local OUTPUT_ENTITY = "lca-hidden-output"
-local SENTINEL_ENTITY = "lca-hidden-sentinel"
+-- The selector's hidden helper entities; clones of these are stray copies
+-- that the owning selector recreates, so they get destroyed on clone.
+local HIDDEN_HELPERS = {
+  ["lca-hidden-output"] = true,
+  ["lca-hidden-sentinel"] = true,
+  ["lca-hidden-anchor"] = true,
+  ["lca-hidden-merge"] = true,
+  ["lca-hidden-map"] = true,
+  ["lca-hidden-gate"] = true,
+}
 
 -- Deep copy for plain config tables (drops userdata, which tags reject).
 local function copy(value)
@@ -84,7 +92,7 @@ local function apply_tag(entity, tag)
     if tag.mode == selector_mode.MODE_CRAFTING_TIME then
       local state = selector_mode.set_crafting_time(entity)
       state.machine = tag.machine
-      state.last_output = nil
+      selector_mode.dirty(entity.unit_number)
       if tag.stash then
         state.stash = copy(tag.stash)
       end
@@ -92,13 +100,13 @@ local function apply_tag(entity, tag)
       local state = selector_mode.set_memory_cell(entity)
       state.condition = copy(tag.condition) or state.condition
       state.stored = {}
-      state.last_output = nil
+      selector_mode.dirty(entity.unit_number)
       if tag.stash then
         state.stash = copy(tag.stash)
       end
     elseif tag.mode == selector_mode.MODE_RECIPE_PRODUCTS then
       local state = selector_mode.set_recipe_products(entity)
-      state.last_output = nil
+      selector_mode.dirty(entity.unit_number)
       if tag.stash then
         state.stash = copy(tag.stash)
       end
@@ -107,7 +115,7 @@ local function apply_tag(entity, tag)
       state.machine = tag.machine
       state.researched_only = tag.researched_only ~= false
       state.no_fluid = tag.no_fluid == true
-      state.last_output = nil
+      selector_mode.dirty(entity.unit_number)
       if tag.stash then
         state.stash = copy(tag.stash)
       end
@@ -183,7 +191,7 @@ function persist.on_cloned(event)
   if not (dest and dest.valid) then
     return
   end
-  if dest.name == OUTPUT_ENTITY or dest.name == SENTINEL_ENTITY then
+  if HIDDEN_HELPERS[dest.name] then
     -- Area clones duplicate the hidden helpers; the owning selector
     -- recreates its own, so the stray copies go.
     dest.destroy()

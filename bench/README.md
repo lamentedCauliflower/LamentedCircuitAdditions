@@ -66,16 +66,28 @@ after harness or mod changes to confirm the benchmark measures real work.
 - Vanilla 2.0 combinators are event-driven C++: with static inputs they cost
   ~nothing, and even with `--dynamic` a selector measures ~0.08 µs/DUT/tick.
   A Lua mod cannot reach that — one Lua→C API call alone costs ~0.4 µs — so
-  the `vs vanilla` ratio is only meaningful on `--dynamic` runs, and the
-  practical targets are absolute: ~2–4 µs/DUT/tick static (sentinel-gated
-  steady state), ~20–35 µs on ticks where the input actually changed.
+  the `vs vanilla` ratio is only meaningful on `--dynamic` runs.
+- Two strategies, by Mode (measured 2.0.76, COUNT=500, 20-signal frames):
+  - **Crafting-Time is fully engine-driven** (a hidden merge→map→gate combinator
+    chain, zero per-tick Lua). It measures **~0.01 µs/DUT static, ~0.9 µs dynamic**
+    — within noise of vanilla. Config changes rewrite the map constant combinator;
+    steady and dynamic ticks are pure engine C++.
+  - **Memory Cell, Recipe Products, Recipe Finder** keep a per-tick Lua driver but
+    gate it through grouped hidden sentinels: **~0.58 µs/DUT static, ~7–10 µs
+    dynamic** (Recipe Finder costliest). The dynamic figure is the engine-API floor
+    (the ~20 µs bulk `get_signals` only runs on actual input-change ticks).
+- The static path for the Lua Modes used to be dominated by a per-DUT scalar
+  sentinel read. Caching the *bound* `get_signal_last_tick` (skipping the LuaObject
+  `__index` lookup) cut that ~3.5 → ~1 µs; **grouping** up to 32 same-surface
+  sentinels under one hidden anchor (one scalar read per group, skipping the whole
+  group when its summed signal is unchanged) cut it further to ~0.58 µs. What
+  remains is the engine cost of the per-DUT hidden helper combinators, not Lua.
 - Key API costs measured on 2.0.76 (20-signal frames): `get_signals` ~20 µs,
-  `network.signals` ~35 µs, `get_signal`/`get_signal_last_tick` ~0.4 µs,
-  `entity.valid` ~0.1 µs. This is why the driver gates on a hidden sentinel
-  arithmetic combinator (one scalar read per tick) instead of reading the
-  frame every tick.
-- `memory-cell-hot` and `--dynamic` runs are worst cases: every tick the
-  input changes, so gating never skips work.
+  `network.signals` ~35 µs, `get_signal`/`get_signal_last_tick` ~0.4 µs (plus a
+  comparable LuaObject `__index` cost per uncached method access),
+  `entity.valid` ~0.1 µs.
+- `memory-cell-hot` and `--dynamic` runs are worst cases for the Lua Modes: every
+  tick the input changes, so gating never skips the bulk read.
 - Benchmark noise: single-digit percent between runs (worse while a desktop
   game is running); the script takes the best of `--runs`. Increase
   `--ticks`/`--runs` for final numbers.
