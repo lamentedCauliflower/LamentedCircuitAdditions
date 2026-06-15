@@ -1,4 +1,9 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.2
+Date: 2026-06-15
+  Optimizations:
+    - offload Crafting-Time to engine combinators and group sentinel drivers
+---------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2026-06-12
   Optimizations:
