@@ -146,7 +146,7 @@ end
 local function condition_of(entity)
   local state = selector_mode.state_of(entity)
   if state and state.mode == selector_mode.MODE_MEMORY_CELL and state.condition then
-    state.last_output = nil
+    selector_mode.dirty(entity.unit_number)
     return state.condition
   end
   return nil
