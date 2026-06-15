@@ -5,3 +5,8 @@
 *.code-workspace
 *.zip
 .claude
+
+# devenv / direnv
+.devenv*
+.direnv
+devenv.local.nix
