@@ -810,15 +810,16 @@ local function write_output(entity, state, out)
     elseif count < INT32_MIN then
       count = INT32_MIN
     end
-    filters[i] = {
-      value = {
-        type = signal.type or "item",
-        name = signal.name,
-        quality = signal.quality or "normal",
-        comparator = "=",
-      },
-      min = count,
-    }
+    local stype = signal.type or "item"
+    local value = { type = stype, name = signal.name }
+    -- Quality + comparator is a non-trivial item filter condition the engine
+    -- refuses to pair with a non-zero request. Only items carry quality, so
+    -- pin it for items and leave non-item symbols (virtual, fluid, …) bare.
+    if stype == "item" then
+      value.quality = signal.quality or "normal"
+      value.comparator = "="
+    end
+    filters[i] = { value = value, min = count }
   end
   local ok, err = pcall(function()
     section.filters = filters
