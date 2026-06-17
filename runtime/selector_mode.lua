@@ -810,6 +810,10 @@ local function write_output(entity, state, out)
     elseif count < INT32_MIN then
       count = INT32_MIN
     end
+    -- A request (non-zero min) needs a concrete quality on EVERY signal type;
+    -- a quality-less value is the "non trivial item filter condition" the
+    -- engine refuses to pair with a request. Pin quality (+ "=") for all
+    -- symbols, not just items — virtual/fluid/recipe alike.
     filters[i] = {
       value = {
         type = signal.type or "item",

@@ -133,15 +133,15 @@ function preset.restore_sections(cb, stash)
   end
 end
 
-local function to_filters(names, with_quality)
+local function to_filters(names)
   local out = {}
   for i, name in ipairs(names) do
-    local value = { type = "recipe", name = name }
-    if with_quality then
-      value.quality = "normal"
-      value.comparator = "="
-    end
-    out[i] = { value = value, min = 1 }
+    -- min = 1 is a request, so the value must pin a concrete quality (+ "=");
+    -- a quality-less filter is the non-trivial condition the engine rejects.
+    out[i] = {
+      value = { type = "recipe", name = name, quality = "normal", comparator = "=" },
+      min = 1,
+    }
   end
   return out
 end
@@ -153,12 +153,7 @@ function preset.apply(entity, state)
   local names = preset.compute(entity.force, state)
   clear_sections(cb)
   local section = cb.add_section()
-  local ok = pcall(function()
-    section.filters = to_filters(names, true)
-  end)
-  if not ok then
-    section.filters = to_filters(names, false)
-  end
+  section.filters = to_filters(names)
   script.register_on_object_destroyed(entity)
   return #names
 end
