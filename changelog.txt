@@ -1,4 +1,10 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.2.1
+Date: 2026-06-17
+  Bugfixes:
+    - don't tag non-item output signals with quality/comparator
+    - pin quality on every output filter, not just items
+---------------------------------------------------------------------------------------------------
 Version: 1.2.0
 Date: 2026-06-15
   Features:
