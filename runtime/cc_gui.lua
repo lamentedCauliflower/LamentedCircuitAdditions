@@ -51,15 +51,16 @@ end
 local signal_to_elem = common.signal_to_elem
 
 local function elem_to_filter_value(sig)
-  local kind = sig.type or "item"
-  local value = { type = kind, name = sig.name }
-  -- A quality-less item filter means "any quality" — a non-trivial condition
-  -- the engine refuses to combine with a count. Pin it down like vanilla does.
-  if sig.quality or kind == "item" then
-    value.quality = sig.quality or "normal"
-    value.comparator = "="
-  end
-  return value
+  -- A quality-less filter is the "any quality" condition the engine refuses to
+  -- pair with a non-zero request — for EVERY signal type, not just items
+  -- (virtual/fluid included). Pin a concrete quality (+ "=") so a request is
+  -- legal; the engine stores "normal" for symbols that have no quality axis.
+  return {
+    type = sig.type or "item",
+    name = sig.name,
+    quality = sig.quality or "normal",
+    comparator = "=",
+  }
 end
 
 local function read_slot(section, index)
