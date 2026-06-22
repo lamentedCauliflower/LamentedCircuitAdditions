@@ -27,9 +27,9 @@ script.on_event(defines.events.on_gui_opened, function(event)
   if not (entity and entity.valid) then
     return
   end
-  if entity.type == "constant-combinator" then
+  if entity.type == "constant-combinator" and entity.name == "constant-combinator" then
     cc_gui.open(game.get_player(event.player_index), entity)
-  elseif entity.type == "selector-combinator" then
+  elseif entity.type == "selector-combinator" and entity.name == "selector-combinator" then
     sc_gui.open(game.get_player(event.player_index), entity)
   end
 end)
