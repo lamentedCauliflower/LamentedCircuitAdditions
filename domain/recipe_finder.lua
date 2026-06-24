@@ -12,10 +12,10 @@ end
 --- Built once per recipe set; hidden and parameter recipes never qualify as
 --- producers, so they are excluded here.
 --- @param recipes table[] plain recipe data:
----   { name, category, hidden, parameter, has_fluid_ingredient,
+---   { name, categories, hidden, parameter, has_fluid_ingredient,
 ---     products = { { type, name }, ... }, main_product = { type, name }? }
 --- @return table<string, table[]> candidates:
----   { name, category, has_fluid_ingredient, is_main }
+---   { name, categories, has_fluid_ingredient, is_main }
 function recipe_finder.index(recipes)
   local index = {}
   for _, recipe in ipairs(recipes) do
@@ -30,7 +30,7 @@ function recipe_finder.index(recipes)
         end
         candidates[#candidates + 1] = {
           name = recipe.name,
-          category = recipe.category,
+          categories = recipe.categories,
           has_fluid_ingredient = recipe.has_fluid_ingredient,
           is_main = main ~= nil and main.type == product.type and main.name == product.name,
         }
@@ -53,8 +53,15 @@ end
 local function primary(candidates, product_name, machine_categories, filters, researched)
   local first_main, first_any
   for _, candidate in ipairs(candidates) do
+    local craftable = false
+    for _, category in ipairs(candidate.categories or {}) do
+      if machine_categories[category] then
+        craftable = true
+        break
+      end
+    end
     if
-      machine_categories[candidate.category]
+      craftable
       and (not filters.researched_only or researched[candidate.name])
       and (not filters.no_fluid_inputs or not candidate.has_fluid_ingredient)
     then

@@ -7,7 +7,7 @@ end
 local function recipe(name, products, overrides)
   local r = {
     name = name,
-    category = "crafting",
+    categories = { "crafting" },
     hidden = false,
     parameter = false,
     has_fluid_ingredient = false,
@@ -90,8 +90,8 @@ describe("domain.recipe_finder.find", function()
 
   it("only considers recipes in the machine's crafting categories", function()
     local recipes = {
-      recipe("steel-plate", { item("steel-plate") }, { category = "smelting" }),
-      recipe("steel-casting", { item("steel-plate") }, { category = "casting" }),
+      recipe("steel-plate", { item("steel-plate") }, { categories = { "smelting" } }),
+      recipe("steel-casting", { item("steel-plate") }, { categories = { "casting" } }),
     }
     local out = find({ sig("item", "steel-plate", 1) }, recipes, { casting = true })
     assert.are.same({
