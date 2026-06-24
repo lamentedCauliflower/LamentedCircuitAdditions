@@ -19,6 +19,7 @@ local OPERATIONS = {
   "rocket-capacity",
   "quality-transfer",
   "quality-filter",
+  "time",
 }
 local OP_INDEX = {}
 for i, op in ipairs(OPERATIONS) do
@@ -207,6 +208,22 @@ local function build_count_panel(panel, params)
     signal = common.signal_to_elem(params.count_signal),
     tags = { lca = "sc", action = "count_signal" },
   }
+end
+
+local function build_time_panel(panel, params)
+  local function signal_row(field, label)
+    local row = labeled_row(panel)
+    row.add{ type = "label", caption = label, style = "semibold_label" }
+    row.add{
+      type = "choose-elem-button",
+      elem_type = "signal",
+      signal = common.signal_to_elem(params[field]),
+      tags = { lca = "sc", action = "time_signal", field = field },
+    }
+  end
+  signal_row("game_tick_signal", { "gui-selector.game-tick" })
+  signal_row("day_tick_signal", { "gui-selector.day-tick" })
+  signal_row("day_length_signal", { "gui-selector.day-length" })
 end
 
 local function build_random_panel(panel, params)
@@ -438,6 +455,7 @@ local PANEL_BUILDERS = {
   ["random"] = build_random_panel,
   ["quality-transfer"] = build_quality_transfer_panel,
   ["quality-filter"] = build_quality_filter_panel,
+  ["time"] = build_time_panel,
   -- stack-size and rocket-capacity have no settings.
 }
 
@@ -761,6 +779,11 @@ function sc_gui.on_elem_changed(event)
   elseif action == "count_signal" then
     update_parameters(player, entity, function(p)
       p.count_signal = sig
+    end)
+  elseif action == "time_signal" then
+    local field = tags.field
+    update_parameters(player, entity, function(p)
+      p[field] = sig
     end)
   elseif action == "qt_source_signal" then
     update_parameters(player, entity, function(p)
