@@ -3,7 +3,7 @@ local craftable_set = require("domain.craftable_set")
 local function recipe(name, overrides)
   local r = {
     name = name,
-    category = "crafting",
+    categories = { "crafting" },
     hidden = false,
     parameter = false,
     has_fluid_ingredient = false,
@@ -28,7 +28,7 @@ describe("domain.craftable_set.compute", function()
 
   it("excludes recipes of categories the machine lacks", function()
     local result = craftable_set.compute(
-      { recipe("steel-plate", { category = "smelting" }), recipe("iron-gear-wheel") },
+      { recipe("steel-plate", { categories = { "smelting" } }), recipe("iron-gear-wheel") },
       CATEGORIES, NO_FILTERS, {}
     )
     assert.are.same({ "iron-gear-wheel" }, result)
@@ -73,7 +73,7 @@ describe("domain.craftable_set.compute", function()
   it("excludes fluid-ingredient recipes when no_fluid_inputs is on", function()
     local recipes = {
       recipe("iron-gear-wheel"),
-      recipe("processing-unit", { category = "crafting-with-fluid", has_fluid_ingredient = true }),
+      recipe("processing-unit", { categories = { "crafting-with-fluid" }, has_fluid_ingredient = true }),
     }
     local on = craftable_set.compute(recipes, CATEGORIES,
       { researched_only = false, no_fluid_inputs = true }, {})

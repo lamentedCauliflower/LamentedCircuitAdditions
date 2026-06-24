@@ -1,6 +1,6 @@
 -- Script-driven Modes for the selector combinator. The engine cannot run
 -- custom selector operations, so while a script Mode is active the vanilla
--- selector is parked inert and deactivated (entity.active = false) and hidden
+-- selector is parked inert and deactivated (entity.disabled_by_script = true) and hidden
 -- helper entities, wired to the selector's connectors, carry the work. All
 -- state lives in storage keyed by unit number.
 --
@@ -150,7 +150,7 @@ local function producer_index()
       end
       recipes[#recipes + 1] = {
         name = name,
-        category = proto.category,
+        categories = proto.categories,
         hidden = proto.hidden,
         parameter = proto.parameter,
         has_fluid_ingredient = has_fluid,
@@ -496,7 +496,7 @@ local function enter_script_mode(entity, mode)
   cb.parameters = INERT_PARAMETERS
   -- The engine never needs to update the parked selector; the helpers carry
   -- the signals.
-  entity.active = false
+  entity.disabled_by_script = true
   script.register_on_object_destroyed(entity)
   return state, true
 end
@@ -627,7 +627,7 @@ function selector_mode.set_vanilla(entity)
     return
   end
   destroy_helpers(state, entity.unit_number)
-  entity.active = true
+  entity.disabled_by_script = false
   local cb = entity.get_or_create_control_behavior()
   local ok = pcall(function()
     cb.parameters = state.stash
@@ -661,7 +661,7 @@ function selector_mode.forget(unit_number)
     destroy_helpers(state, unit_number)
     local entity = state.entity
     if entity and entity.valid then
-      entity.active = true
+      entity.disabled_by_script = false
     end
     mode_states()[unit_number] = nil
   end
@@ -700,7 +700,7 @@ function selector_mode.migrate()
   for un, state in pairs(mode_states()) do
     local entity = state.entity
     if entity and entity.valid then
-      entity.active = false
+      entity.disabled_by_script = true
       state.group_id = nil
       state.last_output = nil
       state.last_input = nil

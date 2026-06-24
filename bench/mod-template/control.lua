@@ -34,7 +34,14 @@ local function machine_recipes()
   local out = {}
   for _, name in ipairs(sorted_keys(prototypes.recipe)) do
     local recipe = prototypes.recipe[name]
-    if categories[recipe.category] and not recipe.hidden and not recipe.parameter then
+    local craftable = false
+    for _, c in ipairs(recipe.categories or {}) do
+      if categories[c] then
+        craftable = true
+        break
+      end
+    end
+    if craftable and not recipe.hidden and not recipe.parameter then
       out[#out + 1] = name
     end
   end

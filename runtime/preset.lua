@@ -58,7 +58,7 @@ local function recipe_data()
     end
     list[#list + 1] = {
       name = name,
-      category = proto.category,
+      categories = proto.categories,
       hidden = proto.hidden,
       parameter = proto.parameter,
       has_fluid_ingredient = has_fluid,

@@ -5,7 +5,7 @@ local craftable_set = {}
 
 --- Recipes a Target Machine can craft, after Filters.
 --- @param recipes table[] plain recipe data:
----   { name, category, hidden, parameter, has_fluid_ingredient }
+---   { name, categories, hidden, parameter, has_fluid_ingredient }
 --- @param machine_categories table<string, boolean> the machine's crafting categories
 --- @param filters table { researched_only = boolean, no_fluid_inputs = boolean }
 --- @param researched table<string, boolean> recipe names enabled for the force
@@ -13,8 +13,15 @@ local craftable_set = {}
 function craftable_set.compute(recipes, machine_categories, filters, researched)
   local names = {}
   for _, recipe in ipairs(recipes) do
+    local craftable = false
+    for _, category in ipairs(recipe.categories or {}) do
+      if machine_categories[category] then
+        craftable = true
+        break
+      end
+    end
     if
-      machine_categories[recipe.category]
+      craftable
       and not recipe.hidden
       and not recipe.parameter
       and (not filters.researched_only or researched[recipe.name])
