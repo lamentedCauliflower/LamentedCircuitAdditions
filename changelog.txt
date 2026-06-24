@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.3.0
+Date: 2026-06-24
+  Features:
+    - [gui] expose the selector combinator's Time operation
+  Bugfixes:
+    - only intercept vanilla CC/selector prototypes in on_gui_opened
+    - recipe.category was removed, use the categories set
+    - use disabled_by_script instead of removed active write
+---------------------------------------------------------------------------------------------------
 Version: 1.2.2
 Date: 2026-06-22
   Bugfixes:
